@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
 :root{font-family:Manrope,Inter,system-ui,sans-serif;color:#e7edf4;background:#080d12;font-synthesis:none;text-rendering:optimizeLegibility;font-optical-sizing:auto}
 *{box-sizing:border-box}body{margin:0;min-width:320px;min-height:100vh;background:radial-gradient(ellipse at 75% -12%,#16303a 0,transparent 38%),#080d12}button,input{font:inherit}button{cursor:pointer}
@@ -27,7 +28,6 @@
 .chart-error{position:absolute;z-index:3;top:35px;left:10px;color:#d69a84;font-size:9px}
 
 /* NORDVEX typography: stronger weights, clearer hierarchy */
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
 :root{font-family:Manrope,Inter,system-ui,sans-serif;font-weight:600}
 body,button,input,textarea{font-weight:600}
 .page-heading h1{font-weight:800;letter-spacing:-1.2px}
