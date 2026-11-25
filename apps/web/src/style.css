@@ -82,3 +82,15 @@ body,button,input,textarea{font-weight:600}
 .native-chart-controls{position:absolute;right:82px;top:34px;display:flex;gap:4px;z-index:3}
 .native-chart-controls button{height:24px;min-width:25px;padding:0 7px;border:1px solid #293d47;border-radius:4px;background:#101e26;color:#9db2bc;font:700 9px Manrope}
 .native-chart-controls button:hover{border-color:#5b9e93;color:#c5eee7}
+
+.native-chart-toolbar{min-height:36px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:5px 9px;background:#0e1921;border-bottom:1px solid #1b2b35}
+.native-chart-toolbar label{display:flex;align-items:center;gap:6px;color:#8298a2;font:700 8px 'DM Mono';letter-spacing:.5px}
+.native-chart-toolbar select{background:#14242c;border:1px solid #2b414a;border-radius:4px;padding:5px 7px;color:#c9d9df;font:700 9px Manrope;outline:none}
+.native-indicators,.native-tools{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.native-indicators button,.native-tools button{border:1px solid transparent;border-radius:4px;background:transparent;padding:5px 7px;color:#81949e;font:700 8px 'DM Mono';cursor:pointer}
+.native-indicators button:hover,.native-tools button:hover{border-color:#38565b;color:#c6e9e2}
+.native-indicators button.tool-on,.native-tools button.tool-on{background:#18332f;border-color:#315b50;color:#8fe0c7}
+.native-tools{margin-left:auto}
+.native-chart-readout{min-height:22px;padding:5px 10px;color:#91a7b1;background:#0b141b;font:8px 'DM Mono';border-bottom:1px solid #192a33;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nvx-chart-canvas{height:calc(100% - 85px);touch-action:none}
+@media(max-width:600px){.native-chart-toolbar{gap:5px}.native-tools{margin-left:0}.native-chart-readout{font-size:7px}}
