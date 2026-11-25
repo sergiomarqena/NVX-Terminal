@@ -15,10 +15,10 @@ export default function LiveChart({symbol,period}) {
   const [exchange,setExchange]=useState("BINANCE"),[status,setStatus]=useState("CONNECTING"),[price,setPrice]=useState("—"),[error,setError]=useState("");
   const [revision,setRevision]=useState(0),[tool,setTool]=useState("crosshair"),[cross,setCross]=useState(null);
   const [ind,setInd]=useState({ema20:true,ema50:false,sma20:false,vwap:false,bb:false,rsi:false});
-  const [drawings,setDrawings]=useState([]);
+  const [drawings,setDrawings]=useState([]),[loadedKey,setLoadedKey]=useState("");
   const bump=()=>setRevision(n=>n+1),storeKey="nvx-drawings:"+symbol+":"+exchange+":"+period;
-  useEffect(()=>{setDrawings(parse(localStorage.getItem(storeKey)));},[storeKey]);
-  useEffect(()=>{try{localStorage.setItem(storeKey,JSON.stringify(drawings));}catch{}},[storeKey,drawings]);
+  useEffect(()=>{setDrawings(parse(localStorage.getItem(storeKey)));setLoadedKey(storeKey);},[storeKey]);
+  useEffect(()=>{if(loadedKey!==storeKey)return;try{localStorage.setItem(storeKey,JSON.stringify(drawings));}catch{}},[storeKey,drawings,loadedKey]);
 
   const draw=useCallback(()=>{
     const c=canvasRef.current;if(!c)return;const r=c.getBoundingClientRect(),dpr=Math.min(window.devicePixelRatio||1,2),w=Math.max(1,r.width),h=Math.max(1,r.height);
@@ -37,7 +37,7 @@ export default function LiveChart({symbol,period}) {
     const line=(vals,col,dash=[])=>{x.beginPath();let begun=false;vals.forEach((n,i)=>{if(n==null||!Number.isFinite(n))return;const xx=X(i);if(!begun){x.moveTo(xx,Y(n));begun=true;}else x.lineTo(xx,Y(n));});x.strokeStyle=col;x.lineWidth=1.5;x.setLineDash(dash);x.stroke();x.setLineDash([]);};
     if(ind.ema20)line(ema(rows,20),"#e8b968");if(ind.ema50)line(ema(rows,50),"#9b91df");if(ind.sma20)line(sma(rows,20),"#73b6e9");
     if(ind.bb){const b=bb(rows);line(b.u,"#7c9fbc",[3,3]);line(b.l,"#7c9fbc",[3,3]);}
-    if(ind.vwap){let pv=0,vol=0;line(rows.map(a=>{pv+=(a.high+a.low+a.close)/3*a.volume;vol+=a.volume;return vol?pv/vol:null;}),"#6daee8");}
+    if(ind.vwap){let pv=0,vol=0,day="";const vwapAll=all.map(a=>{const d=new Date(a.time).toISOString().slice(0,10);if(d!==day){day=d;pv=0;vol=0;}pv+=(a.high+a.low+a.close)/3*a.volume;vol+=a.volume;return vol?pv/vol:null;});line(vwapAll.slice(start,end),"#6daee8");}
     const last=rows.at(-1),py=Y(last.close);x.setLineDash([4,4]);x.strokeStyle="#73cfc0";x.beginPath();x.moveTo(0,py);x.lineTo(pw,py);x.stroke();x.setLineDash([]);x.fillStyle="#1c514b";x.fillRect(pw+2,py-9,right-5,18);x.fillStyle="#e0f5ef";x.font="700 10px 'DM Mono'";x.fillText(last.close.toLocaleString("en-US",{maximumFractionDigits:6}),pw+6,py+4);
     x.fillStyle="#748894";x.font="9px 'DM Mono'";x.textAlign="center";[0,.25,.5,.75,1].forEach(p=>{const a=rows[Math.min(rows.length-1,Math.floor(p*(rows.length-1)))];x.fillText(new Date(a.time).toLocaleString("en-US",{month:"short",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}),pw*p,h-8);});
     const timeX=t=>{let best=0,dist=Infinity;all.forEach((a,i)=>{const d=Math.abs(a.time-t);if(d<dist){dist=d;best=i;}});return pw-(end-1-best)*step-step/2;};
@@ -49,7 +49,7 @@ export default function LiveChart({symbol,period}) {
       else{x.beginPath();x.moveTo(x1,y1);x.lineTo(x2,y2);x.stroke();}};
     drawings.forEach(paint);if(v.current.preview)paint(v.current.preview);
     if(v.current.crossX!==null&&tool==="crosshair"){x.strokeStyle="#a3b4bd";x.setLineDash([3,4]);x.beginPath();x.moveTo(v.current.crossX,top);x.lineTo(v.current.crossX,pb);x.moveTo(0,v.current.crossY);x.lineTo(pw,v.current.crossY);x.stroke();x.setLineDash([]);}
-    if(ind.rsi){const vals=rsi(rows),rh=rsiH-8,ry=pb+5;x.fillStyle="#0d1921";x.fillRect(0,ry,pw,rh);[30,50,70].forEach(n=>{const yy=ry+(100-n)/100*rh;x.strokeStyle="#293a43";x.setLineDash([3,3]);x.beginPath();x.moveTo(0,yy);x.lineTo(pw,yy);x.stroke();x.setLineDash([]);});x.beginPath();vals.forEach((n,i)=>{if(n===null)return;const xx=X(i),yy=ry+(100-n)/100*rh;if(i===0)x.moveTo(xx,yy);else x.lineTo(xx,yy);});x.strokeStyle="#b89de7";x.stroke();x.fillStyle="#a99bd1";x.font="8px 'DM Mono'";x.fillText("RSI 14",5,ry+10);}
+    if(ind.rsi){const vals=rsi(rows),rh=rsiH-8,ry=pb+5;x.fillStyle="#0d1921";x.fillRect(0,ry,pw,rh);[30,50,70].forEach(n=>{const yy=ry+(100-n)/100*rh;x.strokeStyle="#293a43";x.setLineDash([3,3]);x.beginPath();x.moveTo(0,yy);x.lineTo(pw,yy);x.stroke();x.setLineDash([]);});x.beginPath();let started=false;vals.forEach((n,i)=>{if(n===null)return;const xx=X(i),yy=ry+(100-n)/100*rh;if(!started){x.moveTo(xx,yy);started=true;}else x.lineTo(xx,yy);});x.strokeStyle="#b89de7";x.stroke();x.fillStyle="#a99bd1";x.font="8px 'DM Mono'";x.fillText("RSI 14",5,ry+10);}
   },[ind,drawings,tool,status]);
 
   useEffect(()=>{draw();},[draw,revision]);useEffect(()=>{const c=canvasRef.current;if(!c)return;const ro=new ResizeObserver(draw);ro.observe(c);return()=>ro.disconnect();},[draw]);
