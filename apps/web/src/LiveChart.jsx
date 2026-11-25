@@ -60,12 +60,24 @@ export default function LiveChart({symbol,period}) {
     const parseBinance=rows=>rows.map(k=>({time:+k[0],open:+k[1],high:+k[2],low:+k[3],close:+k[4],volume:+k[5]}));
     const parseBybit=rows=>rows.slice().reverse().map(k=>({time:+k[0],open:+k[1],high:+k[2],low:+k[3],close:+k[4],volume:+k[5]}));
     const historyUrl=API_BASE+"/api/v1/market/candles?exchange="+exchange.toLowerCase()+"&symbol="+symbol+"&interval="+tf+"&limit=500";
+    const directHistoryUrl=exchange==="BYBIT"?"https://api.bybit.com/v5/market/kline?category=spot&symbol="+symbol+"&interval="+(BYBIT_TF[period]||"60")+"&limit=500":"https://"+(exchange==="MEXC"?"api.mexc.com":"api.binance.com")+"/api/v3/klines?symbol="+symbol+"&interval="+tf+"&limit=500";
+    const readHistory=async(url,signal)=>{
+      const response=await fetch(url,{signal});
+      if(!response.ok)throw new Error("HTTP "+response.status);
+      const json=await response.json();
+      if(url.includes("bybit.com")){if(json.retCode!==0)throw new Error(json.retMsg||"Bybit history error");return json.result.list.slice().reverse().map(k=>({time:+k[0],open:+k[1],high:+k[2],low:+k[3],close:+k[4],volume:+k[5]}));}
+      if(url.includes("/api/v3/klines"))return json.map(k=>({time:+k[0],open:+k[1],high:+k[2],low:+k[3],close:+k[4],volume:+k[5]}));
+      throw new Error("Unexpected candle response");
+    };
     const start=async()=>{
       try{
-        const response=await fetch(historyUrl);if(!response.ok){const err=await response.json().catch(()=>({}));throw new Error(err.detail||err.error||exchange+" history HTTP "+response.status);}
-        const json=await response.json();
+        let rows,source="NORDVEX API";
+        const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),9000);
+        try{rows=await readHistory(historyUrl,controller.signal);}
+        catch(proxyError){source=exchange+" PUBLIC REST";const fallbackController=new AbortController(),fallbackTimeout=setTimeout(()=>fallbackController.abort(),9000);try{rows=await readHistory(directHistoryUrl,fallbackController.signal);}finally{clearTimeout(fallbackTimeout);}}
+        finally{clearTimeout(timeout);}
         if(cancelled)return;
-        dataRef.current=json.candles.map(normalize);setPrice(dataRef.current.at(-1)?.close.toLocaleString("en-US",{maximumFractionDigits:5})||"—");setStatus("LIVE · "+exchange);bump();
+        dataRef.current=rows.map(normalize);setPrice(dataRef.current.at(-1)?.close.toLocaleString("en-US",{maximumFractionDigits:5})||"—");setStatus("LIVE · "+exchange);bump();
         const connect=()=>{
           const url=exchange==="BINANCE"?"wss://stream.binance.com:9443/ws/"+symbol.toLowerCase()+"@kline_"+tf:exchange==="BYBIT"?"wss://stream.bybit.com/v5/public/spot":"wss://wbs-api.mexc.com/ws";
           ws=new WebSocket(url);
@@ -86,7 +98,7 @@ export default function LiveChart({symbol,period}) {
           ws.onerror=()=>setStatus("STREAM INTERRUPTED");
           ws.onclose=()=>{if(!cancelled){setStatus("RECONNECTING");retry=setTimeout(connect,2200);}};
         };connect();
-      }catch(e){if(!cancelled){setStatus("DATA UNAVAILABLE");setError(e.message);}}
+      }catch(e){if(!cancelled){setStatus("DATA UNAVAILABLE");setError("Unable to load "+exchange+" "+symbol+" candles: "+(e.name==="AbortError"?"request timed out":e.message));}}
     };start();
     return()=>{cancelled=true;clearTimeout(retry);clearInterval(heartbeat);ws?.close();};
   },[symbol,period,exchange]);
