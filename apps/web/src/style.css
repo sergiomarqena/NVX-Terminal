@@ -74,3 +74,11 @@ body,button,input,textarea{font-weight:600}
 .connection-pill.connection-live{color:#8fe0c7;border-color:#315b50;background:#10241f}
 .connection-pill.connection-live i{background:#62d4a9;box-shadow:0 0 8px #62d4a9}
 .quote-up{color:#62c9a6!important}.quote-down{color:#df8585!important}
+
+/* NORDVEX proprietary canvas chart surface */
+.nvx-native-chart{overflow:hidden;touch-action:pan-y}
+.nvx-chart-canvas{display:block;width:100%;height:calc(100% - 27px);cursor:crosshair;touch-action:pan-y}
+.nvx-chart-canvas:active{cursor:grabbing}
+.native-chart-controls{position:absolute;right:82px;top:34px;display:flex;gap:4px;z-index:3}
+.native-chart-controls button{height:24px;min-width:25px;padding:0 7px;border:1px solid #293d47;border-radius:4px;background:#101e26;color:#9db2bc;font:700 9px Manrope}
+.native-chart-controls button:hover{border-color:#5b9e93;color:#c5eee7}
