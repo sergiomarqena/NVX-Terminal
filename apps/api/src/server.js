@@ -29,6 +29,44 @@ const server=http.createServer(async(req,res)=>{
   if(url.pathname==="/api/v1/providers"){
     return send(res,200,{providers:PROVIDERS.map(p=>({id:p.id,name:p.label,credentialsConfigured:p.keys.length?p.keys.every(k=>Boolean(process.env[k])):false,publicMarketData:p.publicMarketData})),note:"Credential presence only. Secret values are never returned."});
   }
+  if(url.pathname==="/api/v1/market/tickers"){
+    const exchange=(url.searchParams.get("exchange")||"binance").toLowerCase();
+    const limit=Math.min(200,Math.max(10,Number(url.searchParams.get("limit")||100)));
+    if(!["binance","bybit","mexc"].includes(exchange))return send(res,400,{error:"Unsupported exchange"});
+    try{
+      let rows=[];
+      if(exchange==="bybit"){
+        const data=await upstream("https://api.bybit.com/v5/market/tickers?category=spot");
+        if(data.retCode!==0)throw new Error(data.retMsg||"Bybit ticker error");
+        rows=(data.result.list||[]).filter(x=>x.symbol.endsWith("USDT")).map(x=>({symbol:x.symbol,lastPrice:+x.lastPrice,priceChangePercent:+x.price24hPcnt*100,quoteVolume:+x.turnover24h,highPrice:+x.highPrice24h,lowPrice:+x.lowPrice24h,volume:+x.volume24h}));
+      }else{
+        const host=exchange==="binance"?"https://api.binance.com":"https://api.mexc.com";
+        const data=await upstream(host+"/api/v3/ticker/24hr");
+        rows=(Array.isArray(data)?data:[]).filter(x=>x.symbol.endsWith("USDT")).map(x=>({symbol:x.symbol,lastPrice:+x.lastPrice,priceChangePercent:+x.priceChangePercent,quoteVolume:+x.quoteVolume,highPrice:+x.highPrice,lowPrice:+x.lowPrice,volume:+x.volume}));
+      }
+      rows=rows.filter(x=>Number.isFinite(x.lastPrice)&&Number.isFinite(x.priceChangePercent)&&Number.isFinite(x.quoteVolume)).sort((a,b)=>b.quoteVolume-a.quoteVolume).slice(0,limit);
+      return send(res,200,{exchange,count:rows.length,tickers:rows,source:"exchange-native",retrievedAt:new Date().toISOString()});
+    }catch(e){return send(res,502,{error:"Ticker feed unavailable",provider:exchange,detail:e.message});}
+  }
+  if(url.pathname==="/api/v1/market/orderbook"){
+    const exchange=(url.searchParams.get("exchange")||"binance").toLowerCase();
+    const symbol=(url.searchParams.get("symbol")||"BTCUSDT").toUpperCase();
+    const limit=Math.min(100,Math.max(5,Number(url.searchParams.get("limit")||25)));
+    if(!["binance","bybit","mexc"].includes(exchange)||!SYMBOL.test(symbol))return send(res,400,{error:"Invalid exchange or symbol"});
+    try{
+      let bids=[],asks=[];
+      if(exchange==="bybit"){
+        const d=await upstream("https://api.bybit.com/v5/market/orderbook?category=spot&symbol="+symbol+"&limit="+limit);
+        if(d.retCode!==0)throw new Error(d.retMsg||"Bybit order book error");
+        bids=d.result.b||[];asks=d.result.a||[];
+      }else{
+        const host=exchange==="binance"?"https://api.binance.com":"https://api.mexc.com";
+        const d=await upstream(host+"/api/v3/depth?symbol="+symbol+"&limit="+limit);
+        bids=d.bids||[];asks=d.asks||[];
+      }
+      return send(res,200,{exchange,symbol,bids:bids.map(x=>({price:+x[0],quantity:+x[1]})),asks:asks.map(x=>({price:+x[0],quantity:+x[1]})),source:"exchange-native",retrievedAt:new Date().toISOString()});
+    }catch(e){return send(res,502,{error:"Order book feed unavailable",provider:exchange,detail:e.message});}
+  }
   if(url.pathname==="/api/v1/instruments"){
     return send(res,200,{instruments:[
       {symbol:"BTCUSDT",name:"Bitcoin",assetClass:"crypto",exchanges:["binance","bybit","mexc"]},
