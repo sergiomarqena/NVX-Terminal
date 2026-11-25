@@ -34,7 +34,30 @@ function App() {
   const [search, setSearch] = useState("");
   const [journalText, setJournalText] = useState(() => localStorage.getItem("nvx-journal-draft") || "");
   const [journalSaved, setJournalSaved] = useState(false);
+  const [liveQuotes, setLiveQuotes] = useState({});
+  const [quoteStatus, setQuoteStatus] = useState("CONNECTING");
   useEffect(() => { localStorage.setItem("nvx-journal-draft", journalText); }, [journalText]);
+  useEffect(() => {
+    let socket;
+    let retry;
+    let closed = false;
+    const connect = () => {
+      socket = new WebSocket("wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/ethusdt@ticker");
+      socket.onopen = () => setQuoteStatus("LIVE");
+      socket.onmessage = event => {
+        const payload = JSON.parse(event.data).data;
+        const symbol = payload.s;
+        setLiveQuotes(prev => ({...prev,[symbol]:{price:Number(payload.c),change:Number(payload.P)}}));
+      };
+      socket.onerror = () => setQuoteStatus("INTERRUPTED");
+      socket.onclose = () => { if(!closed){setQuoteStatus("RECONNECTING");retry=setTimeout(connect,2500);} };
+    };
+    connect();
+    return () => {closed=true;clearTimeout(retry);socket?.close();};
+  }, []);
+  const quote = symbol => liveQuotes[symbol] || null;
+  const fmtPrice = value => value == null ? "—" : value.toLocaleString("en-US",{maximumFractionDigits:value>100?2:4});
+
   const filtered = useMemo(() => watchlist.filter(x => (x.symbol + x.name).toLowerCase().includes(search.toLowerCase())), [search]);
   const current = watchlist.find(x => x.symbol === selected) || watchlist[0];
 
@@ -57,7 +80,7 @@ function App() {
       <header className="topbar">
         <div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu size={19}/></button><div className="breadcrumb">NORDVEX <span>/</span> {active.toUpperCase()}</div></div>
         <div className="topbar-actions">
-          <div className="connection-pill"><i/> CONNECTING TO FEEDS</div>
+          <div className={`connection-pill ${quoteStatus==="LIVE"?"connection-live":""}`}><i/> {quoteStatus==="LIVE"?"CRYPTO FEED LIVE":quoteStatus==="INTERRUPTED"?"FEED INTERRUPTED":"CONNECTING TO FEEDS"}</div>
           <button className="icon-button notification" aria-label="Notifications"><Bell size={17}/><i/></button>
           <div className="avatar">NV</div>
         </div>
@@ -70,7 +93,7 @@ function App() {
         </section>
 
         <section className="ticker-strip">
-          {["BTCUSDT","ETHUSDT","XAUUSD","EURUSD","USOIL"].map((symbol,i)=><button key={symbol} className={selected===symbol?"ticker active-ticker": "ticker"} onClick={()=>setSelected(symbol)}><span>{symbol}</span><b>—</b><small className="ticker-muted">Awaiting feed</small></button>)}
+          {["BTCUSDT","ETHUSDT","XAUUSD","EURUSD","USOIL"].map((symbol,i)=><button key={symbol} className={selected===symbol?"ticker active-ticker": "ticker"} onClick={()=>setSelected(symbol)}><span>{symbol}</span><b>{fmtPrice(quote(symbol)?.price)}</b><small className="ticker-muted">{quote(symbol)?`${quote(symbol).change>=0?"+":""}${quote(symbol).change.toFixed(2)}% · LIVE`:"Awaiting feed"}</small></button>)}
         </section>
 
         {active !== "Overview" && <section className="module-workspace">
@@ -104,7 +127,7 @@ function App() {
             <div className="card-heading"><div><div className="section-kicker">YOUR MARKETS</div><h2>Watchlist</h2></div><button className="icon-button" aria-label="Add symbol"><Plus size={17}/></button></div>
             <div className="watch-search"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search markets..."/></div>
             <div className="watch-columns"><span>INSTRUMENT</span><span>LAST PRICE</span></div>
-            <div className="watch-rows">{filtered.map(item=><button key={item.symbol} className={selected===item.symbol?"watch-row watch-selected":"watch-row"} onClick={()=>setSelected(item.symbol)}><span className="asset-icon">{item.symbol.slice(0,1)}</span><span className="asset-info"><b>{item.symbol}</b><small>{item.name}</small></span><span className="asset-price"><b>{item.price}</b><small>{item.change}</small></span></button>)}{filtered.length===0&&<div className="no-results">No matching instruments</div>}</div>
+            <div className="watch-rows">{filtered.map(item=><button key={item.symbol} className={selected===item.symbol?"watch-row watch-selected":"watch-row"} onClick={()=>setSelected(item.symbol)}><span className="asset-icon">{item.symbol.slice(0,1)}</span><span className="asset-info"><b>{item.symbol}</b><small>{item.name}</small></span><span className="asset-price"><b>{fmtPrice(quote(item.symbol)?.price)}</b><small className={quote(item.symbol)?.change>=0?"quote-up":"quote-down"}>{quote(item.symbol)?`${quote(item.symbol).change>=0?"+":""}${quote(item.symbol).change.toFixed(2)}%`:"Awaiting feed"}</small></span></button>)}{filtered.length===0&&<div className="no-results">No matching instruments</div>}</div>
             <button className="manage-watchlist">MANAGE WATCHLIST <span>→</span></button>
           </section>
 
@@ -115,7 +138,7 @@ function App() {
 
           <section className="card providers-card">
             <div className="card-heading"><div><div className="section-kicker">DATA INFRASTRUCTURE</div><h2>Provider connections</h2></div><span className="provider-count">0 / 5 ONLINE</span></div>
-            <div className="provider-list">{providers.map(name=><div className="provider-row" key={name}><span className="provider-mark">{name.slice(0,1)}</span><b>{name}</b><span className="provider-status"><i/> NOT SYNCED</span></div>)}</div>
+            <div className="provider-list">{providers.map(name=><div className="provider-row" key={name}><span className="provider-mark">{name.slice(0,1)}</span><b>{name}</b><span className="provider-status"><i/> {name==="BINANCE"&&quoteStatus==="LIVE"?"LIVE MARKET DATA":"NOT SYNCED"}</span></div>)}</div>
             <div className="provider-foot"><ShieldCheck size={14}/> API credentials are stored server-side.</div>
           </section>
 
