@@ -37,6 +37,13 @@ function App() {
   const [liveQuotes, setLiveQuotes] = useState({});
   const [quoteStatus, setQuoteStatus] = useState("CONNECTING");
   const [providerInfo, setProviderInfo] = useState([]);
+  const [screenerExchange,setScreenerExchange] = useState("binance");
+  const [screenerRows,setScreenerRows] = useState([]);
+  const [screenerStatus,setScreenerStatus] = useState("CONNECTING");
+  const [book,setBook] = useState(null);
+  const [bookStatus,setBookStatus] = useState("CONNECTING");
+  const [bookExchange,setBookExchange] = useState("binance");
+
   useEffect(() => { localStorage.setItem("nvx-journal-draft", journalText); }, [journalText]);
   useEffect(() => {
     let active = true;
@@ -65,6 +72,32 @@ function App() {
     connect();
     return () => {closed=true;clearTimeout(retry);socket?.close();};
   }, []);
+  useEffect(() => {
+    let active=true, timer;
+    const load=async()=>{
+      try{
+        const r=await fetch("https://nvx-api-production.up.railway.app/api/v1/market/tickers?exchange="+screenerExchange+"&limit=100");
+        const d=await r.json();
+        if(!r.ok)throw new Error(d.detail||d.error||"Ticker request failed");
+        if(active){setScreenerRows(d.tickers||[]);setScreenerStatus("LIVE · "+screenerExchange.toUpperCase());}
+      }catch(e){if(active)setScreenerStatus("UNAVAILABLE · "+e.message);}
+    };
+    load();timer=setInterval(load,10000);
+    return()=>{active=false;clearInterval(timer);};
+  },[screenerExchange]);
+  useEffect(() => {
+    let active=true,timer;
+    const load=async()=>{
+      try{
+        const r=await fetch("https://nvx-api-production.up.railway.app/api/v1/market/orderbook?exchange="+bookExchange+"&symbol="+selected+"&limit=25");
+        const d=await r.json();
+        if(!r.ok)throw new Error(d.detail||d.error||"Order book request failed");
+        if(active){setBook(d);setBookStatus("LIVE · "+bookExchange.toUpperCase());}
+      }catch(e){if(active){setBook(null);setBookStatus("UNAVAILABLE · "+e.message);}}
+    };
+    if(/USDT$/.test(selected)){load();timer=setInterval(load,3000);}else{setBook(null);setBookStatus("CRYPTO PAIR REQUIRED");}
+    return()=>{active=false;clearInterval(timer);};
+  },[selected,bookExchange]);
   const quote = symbol => liveQuotes[symbol] || null;
   const fmtPrice = value => value == null ? "—" : value.toLocaleString("en-US",{maximumFractionDigits:value>100?2:4});
 
@@ -114,13 +147,19 @@ function App() {
             <div className="module-note"><b>Chart tools roadmap</b><span>Drawing tools, indicators, volume, multi-chart layouts and saved templates are the next chart-engine layer.</span></div>
           </div>}
           {active === "Screener" && <div className="card module-card">
-            <div className="card-heading"><div><div className="section-kicker">MARKET SCANNER</div><h2>Instrument screener</h2></div><span className="subtle-tag">LIVE SCANS NOT ENABLED</span></div>
-            <div className="module-table"><div className="module-table-head"><span>SYMBOL</span><span>MARKET</span><span>LAST</span><span>CHANGE</span><span>SCAN STATUS</span></div>
-            {watchlist.map(x=><button className="module-table-row" key={x.symbol} onClick={()=>{setSelected(x.symbol);setActive("Charting");}}><b>{x.symbol}</b><span>{x.market}</span><span>—</span><span>—</span><em>Awaiting feed</em></button>)}</div>
-            <div className="module-note"><b>Scanner engine</b><span>Filters, gainers/losers, relative volume, momentum and custom conditions will populate when market feeds are connected.</span></div>
+            <div className="card-heading"><div><div className="section-kicker">LIVE MARKET SCANNER</div><h2>Top USDT markets by quote volume</h2></div><span className="subtle-tag">{screenerStatus}</span></div>
+            <div className="screener-controls"><label>EXCHANGE <select value={screenerExchange} onChange={e=>setScreenerExchange(e.target.value)}><option value="binance">BINANCE</option><option value="bybit">BYBIT</option><option value="mexc">MEXC</option></select></label><span>Refreshes every 10 seconds · exchange-native 24h statistics</span></div>
+            <div className="module-table live-screener-table"><div className="module-table-head"><span>SYMBOL</span><span>LAST PRICE</span><span>24H CHANGE</span><span>QUOTE VOL.</span><span>MARKET</span></div>
+            {screenerRows.map(x=><button className="module-table-row" key={x.symbol} onClick={()=>{setSelected(x.symbol);setActive("Charting");}}><b>{x.symbol}</b><span>{Number(x.lastPrice).toLocaleString("en-US",{maximumFractionDigits:6})}</span><span className={x.priceChangePercent>=0?"quote-up":"quote-down"}>{x.priceChangePercent>=0?"+":""}{x.priceChangePercent.toFixed(2)}%</span><span>{(x.quoteVolume/1e6).toFixed(2)}M</span><em>SPOT</em></button>)}
+            {screenerRows.length===0&&<div className="screener-empty">Waiting for exchange ticker data…</div>}</div>
+            <div className="module-note"><b>Data integrity</b><span>Volume and price change are from the selected exchange only. No cross-exchange volume blending or generated signals.</span></div>
           </div>}
-          {active === "Order Flow" && <div className="module-grid">
-            {["ORDER BOOK DEPTH","FOOTPRINT / DELTA","LIQUIDITY HEATMAP","VOLUME BUBBLES"].map((name,i)=><div className="card module-feature" key={name}><div className="section-kicker">ORDER FLOW {String(i+1).padStart(2,"0")}</div><h2>{name}</h2><div className="empty-visual"><Waves size={25}/><b>Awaiting compatible feed</b><span>Real exchange depth and trade data required. No simulated liquidity is displayed.</span></div><span className="subtle-tag">NOT CONNECTED</span></div>)}
+          {active === "Order Flow" && <div className="card module-card orderbook-card">
+            <div className="card-heading"><div><div className="section-kicker">LIVE EXCHANGE DEPTH</div><h2>{selected} · Order Book</h2></div><span className="subtle-tag">{bookStatus}</span></div>
+            <div className="screener-controls"><label>EXCHANGE <select value={bookExchange} onChange={e=>setBookExchange(e.target.value)}><option value="binance">BINANCE</option><option value="bybit">BYBIT</option><option value="mexc">MEXC</option></select></label><span>Refreshes every 3 seconds · top 25 levels</span></div>
+            {book?<><div className="book-summary"><div><small>BID DEPTH</small><b>{book.bids.reduce((n,x)=>n+x.price*x.quantity,0).toLocaleString("en-US",{maximumFractionDigits:0})}</b></div><div><small>ASK DEPTH</small><b>{book.asks.reduce((n,x)=>n+x.price*x.quantity,0).toLocaleString("en-US",{maximumFractionDigits:0})}</b></div><div><small>IMBALANCE</small><b>{(book.bids.reduce((n,x)=>n+x.price*x.quantity,0)/(book.asks.reduce((n,x)=>n+x.price*x.quantity,0)||1)).toFixed(2)}×</b></div></div>
+            <div className="book-columns"><div><h3>BIDS · BUY SIDE</h3>{book.bids.slice(0,15).map((x,i)=><div className="book-row bid-row" key={"b"+i}><span>{x.price.toLocaleString("en-US",{maximumFractionDigits:6})}</span><span>{x.quantity.toFixed(5)}</span><b>{(x.price*x.quantity).toLocaleString("en-US",{maximumFractionDigits:0})}</b></div>)}</div><div><h3>ASKS · SELL SIDE</h3>{book.asks.slice(0,15).map((x,i)=><div className="book-row ask-row" key={"a"+i}><span>{x.price.toLocaleString("en-US",{maximumFractionDigits:6})}</span><span>{x.quantity.toFixed(5)}</span><b>{(x.price*x.quantity).toLocaleString("en-US",{maximumFractionDigits:0})}</b></div>)}</div></div></>:<div className="screener-empty">Select a USDT spot pair to load live order-book depth. {bookStatus}</div>}
+            <div className="module-note"><b>Order-flow scope</b><span>This is visible spot order-book depth, not hidden liquidity, footprint delta, or a full historical heatmap. Depth is exchange-specific and can change rapidly.</span></div>
           </div>}
           {active === "Market Radar" && <div className="card module-card"><div className="card-heading"><div><div className="section-kicker">CROSS-MARKET MONITOR</div><h2>Market Radar</h2></div><span className="subtle-tag">PROVIDER SYNC PENDING</span></div><div className="radar-grid">{[{s:"BTCUSDT",m:"CRYPTO"},{s:"XAUUSD",m:"METALS"},{s:"DXY",m:"CURRENCY INDEX"},{s:"USOIL",m:"ENERGY"},{s:"SPX",m:"INDICES"},{s:"EURUSD",m:"FOREX"}].map(x=><button key={x.s} onClick={()=>{if(watchlist.some(w=>w.symbol===x.s))setSelected(x.s);}}><small>{x.m}</small><b>{x.s}</b><span>—</span><em>Feed pending</em></button>)}</div><div className="module-note"><b>Correlation and macro radar</b><span>Relative strength, correlation matrix, volatility regime and macro event overlays will be enabled after provider integration.</span></div></div>}
           {active === "Journal" && <div className="card module-card journal-card"><div className="section-kicker">TRADING RESEARCH</div><h2>Trading journal</h2><p>Record your market thesis, observations and review notes. Draft is saved in this browser.</p><textarea value={journalText} onChange={e=>{setJournalText(e.target.value);setJournalSaved(false);}} placeholder="Write your market plan or trade review..."/><div className="journal-actions"><span>{journalText.length} characters · Local browser draft</span><button className="control-button" onClick={()=>{localStorage.setItem("nvx-journal-draft",journalText);setJournalSaved(true);}}>Save draft</button></div>{journalSaved&&<span className="saved-label">Draft saved on this device</span>}</div>}
