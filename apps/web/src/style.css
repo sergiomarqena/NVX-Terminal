@@ -116,3 +116,19 @@ body,button,input,textarea{font-weight:600}
 .bid-row span:first-child{color:#62c9a6}.ask-row span:first-child{color:#df8585}
 .orderbook-card{min-height:400px}
 @media(max-width:700px){.book-columns{grid-template-columns:1fr}.book-row{font-size:9px}.book-summary b{font-size:12px}.live-screener-table .module-table-head,.live-screener-table .module-table-row{grid-template-columns:1fr 1fr .8fr}.live-screener-table .module-table-head span:nth-child(n+4),.live-screener-table .module-table-row span:nth-child(n+4){display:none}}
+
+
+/* Native chart layout: controls may wrap without stealing the plotting area */
+.nvx-native-chart{display:flex;flex-direction:column;min-height:260px}
+.nvx-native-chart .live-chart-meta,.nvx-native-chart .native-chart-toolbar,.nvx-native-chart .native-chart-readout{flex:0 0 auto}
+.nvx-native-chart .native-chart-toolbar{align-items:flex-start}
+.nvx-native-chart .native-tools{margin-left:auto}
+.nvx-native-chart .nvx-chart-canvas{flex:1 1 auto;min-height:180px;height:auto;touch-action:none;cursor:crosshair}
+.nvx-native-chart .native-tools button:disabled,.nvx-native-chart .native-indicators button:disabled{opacity:.35;cursor:not-allowed}
+.nvx-native-chart .native-tools button:focus-visible,.nvx-native-chart .native-indicators button:focus-visible{outline:2px solid #70bdb1;outline-offset:1px}
+@media(max-width:700px){
+  .nvx-native-chart{height:340px}
+  .nvx-native-chart .native-tools{margin-left:0}
+  .nvx-native-chart .native-chart-toolbar{gap:4px}
+  .nvx-native-chart .native-indicators button,.nvx-native-chart .native-tools button{padding:6px 5px;font-size:7px}
+}
