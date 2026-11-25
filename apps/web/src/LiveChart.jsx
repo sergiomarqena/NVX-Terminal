@@ -8,7 +8,7 @@ const ema = (a,n) => { const o=Array(a.length).fill(null),k=2/(n+1);let v=null;a
 const sma = (a,n) => a.map((r,i)=>i<n-1?null:a.slice(i-n+1,i+1).reduce((s,x)=>s+x.close,0)/n);
 const bb = a => { const m=sma(a,20),u=[],l=[];m.forEach((v,i)=>{if(v===null){u.push(null);l.push(null);}else{const d=Math.sqrt(a.slice(i-19,i+1).reduce((s,x)=>s+(x.close-v)**2,0)/20)*2;u.push(v+d);l.push(v-d);}});return {u,l}; };
 const rsi = a => {const o=Array(a.length).fill(null);let g=0,l=0;for(let i=1;i<a.length;i++){const d=a[i].close-a[i-1].close;g+=Math.max(0,d);l+=Math.max(0,-d);if(i===14){g/=14;l/=14;}else if(i>14){g=(g*13+Math.max(0,d))/14;l=(l*13+Math.max(0,-d))/14;}if(i>=14)o[i]=l===0?100:100-100/(1+g/l);}return o;};
-const parse = x => {try{return JSON.parse(x);}catch{return [];}};
+const parse = x => {try{const value=JSON.parse(x);return Array.isArray(value)?value:[];}catch{return [];}};
 
 export default function LiveChart({symbol,period}) {
   const canvasRef=useRef(null),dataRef=useRef([]),geom=useRef(null),v=useRef({scale:1,offset:0,priceZoom:1,pricePan:0,drag:null,anchor:null,preview:null,crossX:null,crossY:null});
