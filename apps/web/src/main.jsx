@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity, ArrowDownRight, ArrowUpRight, BarChart3, Bell, CandlestickChart,
@@ -32,6 +32,9 @@ function App() {
   const [period, setPeriod] = useState("1H");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [journalText, setJournalText] = useState(() => localStorage.getItem("nvx-journal-draft") || "");
+  const [journalSaved, setJournalSaved] = useState(false);
+  useEffect(() => { localStorage.setItem("nvx-journal-draft", journalText); }, [journalText]);
   const filtered = useMemo(() => watchlist.filter(x => (x.symbol + x.name).toLowerCase().includes(search.toLowerCase())), [search]);
   const current = watchlist.find(x => x.symbol === selected) || watchlist[0];
 
@@ -70,7 +73,26 @@ function App() {
           {["BTCUSDT","ETHUSDT","XAUUSD","EURUSD","USOIL"].map((symbol,i)=><button key={symbol} className={selected===symbol?"ticker active-ticker": "ticker"} onClick={()=>setSelected(symbol)}><span>{symbol}</span><b>—</b><small className="ticker-muted">Awaiting feed</small></button>)}
         </section>
 
-        <div className="dashboard-grid">
+        {active !== "Overview" && <section className="module-workspace">
+          {active === "Charting" && <div className="card module-chart-card">
+            <div className="card-heading"><div><div className="section-kicker">ADVANCED CHART WORKSPACE</div><h2>{current.symbol} · {current.name}</h2></div><span className="subtle-tag">BINANCE SPOT FEED</span></div>
+            <div className="chart-toolbar"><div className="timeframes">{["1m","5m","15m","1H","4H","1D","1W"].map(t=><button key={t} className={period===t?"time-active":""} onClick={()=>setPeriod(t)}>{t}</button>)}</div><div className="chart-tools"><span>Crosshair enabled</span><span>Auto scale</span></div></div>
+            <LiveChart symbol={selected} period={period}/>
+            <div className="module-note"><b>Chart tools roadmap</b><span>Drawing tools, indicators, volume, multi-chart layouts and saved templates are the next chart-engine layer.</span></div>
+          </div>}
+          {active === "Screener" && <div className="card module-card">
+            <div className="card-heading"><div><div className="section-kicker">MARKET SCANNER</div><h2>Instrument screener</h2></div><span className="subtle-tag">LIVE SCANS NOT ENABLED</span></div>
+            <div className="module-table"><div className="module-table-head"><span>SYMBOL</span><span>MARKET</span><span>LAST</span><span>CHANGE</span><span>SCAN STATUS</span></div>
+            {watchlist.map(x=><button className="module-table-row" key={x.symbol} onClick={()=>{setSelected(x.symbol);setActive("Charting");}}><b>{x.symbol}</b><span>{x.market}</span><span>—</span><span>—</span><em>Awaiting feed</em></button>)}</div>
+            <div className="module-note"><b>Scanner engine</b><span>Filters, gainers/losers, relative volume, momentum and custom conditions will populate when market feeds are connected.</span></div>
+          </div>}
+          {active === "Order Flow" && <div className="module-grid">
+            {["ORDER BOOK DEPTH","FOOTPRINT / DELTA","LIQUIDITY HEATMAP","VOLUME BUBBLES"].map((name,i)=><div className="card module-feature" key={name}><div className="section-kicker">ORDER FLOW {String(i+1).padStart(2,"0")}</div><h2>{name}</h2><div className="empty-visual"><Waves size={25}/><b>Awaiting compatible feed</b><span>Real exchange depth and trade data required. No simulated liquidity is displayed.</span></div><span className="subtle-tag">NOT CONNECTED</span></div>)}
+          </div>}
+          {active === "Market Radar" && <div className="card module-card"><div className="card-heading"><div><div className="section-kicker">CROSS-MARKET MONITOR</div><h2>Market Radar</h2></div><span className="subtle-tag">PROVIDER SYNC PENDING</span></div><div className="radar-grid">{[{s:"BTCUSDT",m:"CRYPTO"},{s:"XAUUSD",m:"METALS"},{s:"DXY",m:"CURRENCY INDEX"},{s:"USOIL",m:"ENERGY"},{s:"SPX",m:"INDICES"},{s:"EURUSD",m:"FOREX"}].map(x=><button key={x.s} onClick={()=>{if(watchlist.some(w=>w.symbol===x.s))setSelected(x.s);}}><small>{x.m}</small><b>{x.s}</b><span>—</span><em>Feed pending</em></button>)}</div><div className="module-note"><b>Correlation and macro radar</b><span>Relative strength, correlation matrix, volatility regime and macro event overlays will be enabled after provider integration.</span></div></div>}
+          {active === "Journal" && <div className="card module-card journal-card"><div className="section-kicker">TRADING RESEARCH</div><h2>Trading journal</h2><p>Record your market thesis, observations and review notes. Draft is saved in this browser.</p><textarea value={journalText} onChange={e=>{setJournalText(e.target.value);setJournalSaved(false);}} placeholder="Write your market plan or trade review..."/><div className="journal-actions"><span>{journalText.length} characters · Local browser draft</span><button className="control-button" onClick={()=>{localStorage.setItem("nvx-journal-draft",journalText);setJournalSaved(true);}}>Save draft</button></div>{journalSaved&&<span className="saved-label">Draft saved on this device</span>}</div>}
+        </section>}
+        <div className={`dashboard-grid ${active !== "Overview" ? "overview-hidden" : ""}`}>
           <section className="card chart-card">
             <div className="card-heading chart-heading"><div><div className="section-kicker">PRICE ACTION</div><div className="instrument-title"><strong>{current.symbol}</strong><span>{current.name}</span><span className="feed-badge"><i/> NO FEED</span></div></div><div className="chart-actions"><button className="control-button"><Star size={14}/> Watch</button><button className="control-button"><Settings2 size={14}/></button></div></div>
             <div className="chart-toolbar"><div className="timeframes">{["1m","5m","15m","1H","4H","1D","1W"].map(t=><button key={t} className={period===t?"time-active":""} onClick={()=>setPeriod(t)}>{t}</button>)}</div><div className="chart-tools"><span><BarChart3 size={14}/> Indicators</span><span><Layers3 size={14}/> Layout</span></div></div>
