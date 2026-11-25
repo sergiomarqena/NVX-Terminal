@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 const TF = {"1m":"1m","5m":"5m","15m":"15m","1H":"1h","4H":"4h","1D":"1d","1W":"1w"};
 const BYBIT_TF = {"1m":"1","5m":"5","15m":"15","1H":"60","4H":"240","1D":"D","1W":"W"};
 const PAIR_OK = ["BTCUSDT","ETHUSDT"];
+const API_BASE = import.meta.env.VITE_API_URL || "https://nvx-api-production.up.railway.app";
 const avg = (rows, period) => rows.map((r,i) => i+1<period ? null : rows.slice(i-period+1,i+1).reduce((s,x)=>s+x.close,0)/period);
 const normalize = (r) => ({time:r.time,open:+r.open,high:+r.high,low:+r.low,close:+r.close,volume:+r.volume});
 
@@ -58,15 +59,13 @@ export default function LiveChart({symbol,period}) {
     const tf=TF[period]||"1h";
     const parseBinance=rows=>rows.map(k=>({time:+k[0],open:+k[1],high:+k[2],low:+k[3],close:+k[4],volume:+k[5]}));
     const parseBybit=rows=>rows.slice().reverse().map(k=>({time:+k[0],open:+k[1],high:+k[2],low:+k[3],close:+k[4],volume:+k[5]}));
-    const historyUrl=exchange==="BINANCE"?`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=500`:exchange==="BYBIT"?`https://api.bybit.com/v5/market/kline?category=spot&symbol=${symbol}&interval=${BYBIT_TF[period]||"60"}&limit=500`:`https://api.mexc.com/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=500`;
+    const historyUrl=API_BASE+"/api/v1/market/candles?exchange="+exchange.toLowerCase()+"&symbol="+symbol+"&interval="+tf+"&limit=500";
     const start=async()=>{
       try{
-        const response=await fetch(historyUrl);if(!response.ok)throw new Error(exchange+" history HTTP "+response.status);
-        const json=await response.json();let rows;
-        if(exchange==="BYBIT"){if(json.retCode!==0)throw new Error(json.retMsg||"Bybit history error");rows=parseBybit(json.result.list);}
-        else rows=parseBinance(json);
+        const response=await fetch(historyUrl);if(!response.ok){const err=await response.json().catch(()=>({}));throw new Error(err.detail||err.error||exchange+" history HTTP "+response.status);}
+        const json=await response.json();
         if(cancelled)return;
-        dataRef.current=rows.map(normalize);setPrice(dataRef.current.at(-1)?.close.toLocaleString("en-US",{maximumFractionDigits:5})||"—");setStatus("LIVE · "+exchange);bump();
+        dataRef.current=json.candles.map(normalize);setPrice(dataRef.current.at(-1)?.close.toLocaleString("en-US",{maximumFractionDigits:5})||"—");setStatus("LIVE · "+exchange);bump();
         const connect=()=>{
           const url=exchange==="BINANCE"?"wss://stream.binance.com:9443/ws/"+symbol.toLowerCase()+"@kline_"+tf:exchange==="BYBIT"?"wss://stream.bybit.com/v5/public/spot":"wss://wbs-api.mexc.com/ws";
           ws=new WebSocket(url);
