@@ -70,3 +70,7 @@ body,button,input,textarea{font-weight:600}
 .overview-hidden{display:none}
 .subtle-tag{font:700 8px 'DM Mono';letter-spacing:.5px;color:#c4a66f;border:1px solid #4b402e;border-radius:4px;padding:6px 8px;white-space:nowrap}
 @media(max-width:800px){.module-grid{grid-template-columns:1fr}.radar-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.module-table-head,.module-table-row{grid-template-columns:1.1fr .8fr .5fr .5fr}.module-table-head span:nth-child(5),.module-table-row em{display:none}.module-chart-card .live-chart-wrap{height:320px}.module-chart-card .live-chart-canvas{height:293px}}
+
+.connection-pill.connection-live{color:#8fe0c7;border-color:#315b50;background:#10241f}
+.connection-pill.connection-live i{background:#62d4a9;box-shadow:0 0 8px #62d4a9}
+.quote-up{color:#62c9a6!important}.quote-down{color:#df8585!important}
