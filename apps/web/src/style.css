@@ -16,3 +16,12 @@
 @media(max-width:1100px){.sidebar{width:218px;flex-basis:218px}.content{padding:25px 22px 0}.topbar{padding:0 22px}.dashboard-grid{grid-template-columns:minmax(0,1.4fr) minmax(260px,.9fr)}.provider-list{grid-template-columns:1fr}.provider-row:nth-child(n+4){display:none}}
 @media(max-width:800px){.sidebar{position:fixed;left:0;top:0;bottom:0;width:255px;transform:translateX(-105%);transition:transform .22s ease;box-shadow:none}.sidebar.sidebar-open{transform:translateX(0);box-shadow:20px 0 60px #0009}.mobile-menu{display:grid}.close-menu{display:grid;margin-left:auto}.topbar{height:58px;padding:0 15px}.topbar-left{gap:10px}.content{padding:23px 15px 0}.dashboard-grid{grid-template-columns:1fr}.watch-card{grid-row:auto}.intelligence-card{grid-column:auto}.provider-list{grid-template-columns:1fr 1fr}.provider-row:nth-child(n){display:flex}.heading-meta{display:none}.ticker-strip{grid-template-columns:repeat(5,minmax(105px,1fr));overflow-x:auto}.ticker{padding:10px}.chart-stage{height:255px}}
 @media(max-width:520px){.connection-pill{font-size:0;padding:8px}.connection-pill i{margin:0}.topbar-actions{gap:10px}.page-heading h1{font-size:29px}.page-heading p{max-width:280px;line-height:1.6}.chart-toolbar{align-items:flex-start;gap:8px;flex-direction:column}.chart-tools{padding:2px 3px}.chart-footer{gap:9px}.provider-list{grid-template-columns:1fr 1fr}.app-footer{flex-direction:column}.card{padding:14px}.metrics-card{min-height:0}.ticker-strip{margin-left:-1px;margin-right:-1px}}
+
+.live-chart-wrap{height:286px;position:relative;background:#0b131a;border-bottom:1px solid #1d2b35}
+.live-chart-meta{height:27px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;color:#7c929d;font:8px 'DM Mono';letter-spacing:.6px;border-bottom:1px solid #17252e}
+.live-chart-meta span{display:flex;align-items:center;gap:6px}.live-chart-meta span i{width:5px;height:5px;border-radius:50%;background:#b89b62}.live-chart-meta span i.live-dot{background:#53c7a7;box-shadow:0 0 7px #53c7a7}
+.live-chart-meta b{font-size:10px;color:#cbd9df;font-weight:500}
+.live-chart-canvas{height:259px;width:100%}
+.chart-overlay{position:absolute;z-index:2;inset:27px 0 0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:20px;background:#0b131ae8}
+.chart-overlay b{font-size:12px;color:#c6d5dc}.chart-overlay span{max-width:340px;font-size:9px;line-height:1.7;color:#788d98}
+.chart-error{position:absolute;z-index:3;top:35px;left:10px;color:#d69a84;font-size:9px}
