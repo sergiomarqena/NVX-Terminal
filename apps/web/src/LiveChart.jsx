@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { createChart, CandlestickSeries } from "lightweight-charts";
+import { createChart, CandlestickSeries, HistogramSeries } from "lightweight-charts";
 
 const intervals = new Set(["1m","5m","15m","1h","4h","1d","1w"]);
 const supported = new Set(["BTCUSDT","ETHUSDT"]);
@@ -8,6 +8,7 @@ export default function LiveChart({ symbol, period }) {
   const host = useRef(null);
   const chartRef = useRef(null);
   const candleRef = useRef(null);
+  const volumeRef = useRef(null);
   const [status, setStatus] = useState("CONNECTING");
   const [lastPrice, setLastPrice] = useState("—");
   const [error, setError] = useState("");
@@ -27,14 +28,18 @@ export default function LiveChart({ symbol, period }) {
       borderUpColor: "#42bda5", borderDownColor: "#d36f70",
       wickUpColor: "#42bda5", wickDownColor: "#d36f70",
     });
+    const volume = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "" });
+    chart.priceScale("").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    series.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.22 } });
     chartRef.current = chart;
     candleRef.current = series;
+    volumeRef.current = volume;
     const resize = new ResizeObserver(entries => {
       const { width, height } = entries[0].contentRect;
       chart.applyOptions({ width, height });
     });
     resize.observe(host.current);
-    return () => { resize.disconnect(); chart.remove(); chartRef.current = null; candleRef.current = null; };
+    return () => { resize.disconnect(); chart.remove(); chartRef.current = null; candleRef.current = null; volumeRef.current = null; };
   }, []);
 
   useEffect(() => {
@@ -45,6 +50,7 @@ export default function LiveChart({ symbol, period }) {
     if (!supported.has(symbol)) {
       setStatus("FEED NOT CONFIGURED");
       candleRef.current?.setData([]);
+      volumeRef.current?.setData([]);
       return;
     }
     const interval = intervals.has(period.toLowerCase()) ? period.toLowerCase() : "1h";
@@ -55,7 +61,9 @@ export default function LiveChart({ symbol, period }) {
       .then(rows => {
         if (cancelled) return;
         const data = rows.map(k => ({ time: Math.floor(k[0] / 1000), open: +k[1], high: +k[2], low: +k[3], close: +k[4] }));
+        const volumes = rows.map(k => ({ time: Math.floor(k[0] / 1000), value: +k[5], color: +k[4] >= +k[1] ? "#287d6c99" : "#a9515799" }));
         candleRef.current?.setData(data);
+        volumeRef.current?.setData(volumes);
         chartRef.current?.timeScale().fitContent();
         if (data.length) setLastPrice(data[data.length - 1].close.toLocaleString("en-US", { maximumFractionDigits: 4 }));
         setStatus("LIVE · BINANCE SPOT");
@@ -64,6 +72,7 @@ export default function LiveChart({ symbol, period }) {
           const payload = JSON.parse(event.data);
           const k = payload.k;
           candleRef.current?.update({ time: Math.floor(k.t / 1000), open: +k.o, high: +k.h, low: +k.l, close: +k.c });
+          volumeRef.current?.update({ time: Math.floor(k.t / 1000), value: +k.v, color: +k.c >= +k.o ? "#287d6c99" : "#a9515799" });
           setLastPrice((+k.c).toLocaleString("en-US", { maximumFractionDigits: 4 }));
         };
         socket.onerror = () => setStatus("STREAM INTERRUPTED");
