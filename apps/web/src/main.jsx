@@ -36,7 +36,17 @@ function App() {
   const [journalSaved, setJournalSaved] = useState(false);
   const [liveQuotes, setLiveQuotes] = useState({});
   const [quoteStatus, setQuoteStatus] = useState("CONNECTING");
+  const [providerInfo, setProviderInfo] = useState([]);
   useEffect(() => { localStorage.setItem("nvx-journal-draft", journalText); }, [journalText]);
+  useEffect(() => {
+    let active = true;
+    fetch("https://nvx-api-production.up.railway.app/api/v1/providers")
+      .then(r => { if(!r.ok) throw new Error("Provider status unavailable"); return r.json(); })
+      .then(data => { if(active) setProviderInfo(data.providers || []); })
+      .catch(() => { if(active) setProviderInfo([]); });
+    return () => { active = false; };
+  }, []);
+
   useEffect(() => {
     let socket;
     let retry;
@@ -138,7 +148,7 @@ function App() {
 
           <section className="card providers-card">
             <div className="card-heading"><div><div className="section-kicker">DATA INFRASTRUCTURE</div><h2>Provider connections</h2></div><span className="provider-count">0 / 5 ONLINE</span></div>
-            <div className="provider-list">{providers.map(name=><div className="provider-row" key={name}><span className="provider-mark">{name.slice(0,1)}</span><b>{name}</b><span className="provider-status"><i/> {name==="BINANCE"&&quoteStatus==="LIVE"?"LIVE MARKET DATA":"NOT SYNCED"}</span></div>)}</div>
+            <div className="provider-list">{providers.map(name=>{const p=providerInfo.find(x=>x.name.toUpperCase()===name);return <div className="provider-row" key={name}><span className="provider-mark">{name.slice(0,1)}</span><b>{name}</b><span className="provider-status"><i/> {p?.credentialsConfigured?"KEY CONFIGURED":p?.publicMarketData?"PUBLIC FEED":"STATUS UNKNOWN"}</span></div>;})}</div>
             <div className="provider-foot"><ShieldCheck size={14}/> API credentials are stored server-side.</div>
           </section>
 
