@@ -5,10 +5,10 @@ const FRONTEND_ORIGIN=process.env.FRONTEND_ORIGIN||"https://nvx-frontend-product
 const TIMEFRAMES=new Set(["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d","3d","1w","1M"]);
 const SYMBOL=/^[A-Z0-9]{5,20}$/;
 const PROVIDERS=[
-  {id:"binance",label:"Binance",keys:["BINANCE_API","BINANCE_API_SECRET"],publicMarketData:true},
-  {id:"bybit",label:"Bybit",keys:["BYBIT_API","BYBIT_API_SECRET"],publicMarketData:true},
+  {id:"binance",label:"Binance",keys:["BINANCE_API_KEY","BINANCE_API_SECRET"],publicMarketData:true},
+  {id:"bybit",label:"Bybit",keys:["BYBIT_API_KEY","BYBIT_API_SECRET"],publicMarketData:true},
   {id:"mexc",label:"MEXC",keys:[],publicMarketData:true},
-  {id:"coingecko",label:"CoinGecko",keys:["COINGEKO_API_KEY"],publicMarketData:true},
+  {id:"coingecko",label:"CoinGecko",keys:["COINGECKO_API_KEY"],publicMarketData:true},
   {id:"coinmarketcap",label:"CoinMarketCap",keys:["COINMARKETCAP_API_KEY"],publicMarketData:true}
 ];
 const send=(res,status,data)=>{res.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});res.end(JSON.stringify(data));};
