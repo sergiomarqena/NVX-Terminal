@@ -94,3 +94,25 @@ body,button,input,textarea{font-weight:600}
 .native-chart-readout{min-height:22px;padding:5px 10px;color:#91a7b1;background:#0b141b;font:8px 'DM Mono';border-bottom:1px solid #192a33;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nvx-chart-canvas{height:calc(100% - 85px);touch-action:none}
 @media(max-width:600px){.native-chart-toolbar{gap:5px}.native-tools{margin-left:0}.native-chart-readout{font-size:7px}}
+
+/* Live screener and order-book workspaces */
+.screener-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:17px 0 12px;padding:10px 12px;border:1px solid #223640;border-radius:6px;background:#0d171e}
+.screener-controls label{display:flex;align-items:center;gap:8px;color:#8ba0aa;font:700 8px 'DM Mono';letter-spacing:.6px}
+.screener-controls select{background:#14242c;border:1px solid #2b414a;border-radius:4px;padding:6px 9px;color:#d3e1e5;font:700 9px Manrope}
+.screener-controls>span{font-size:9px;color:#748994}
+.live-screener-table .module-table-head,.live-screener-table .module-table-row{grid-template-columns:1.2fr 1fr .9fr 1fr .5fr}
+.live-screener-table .module-table-row span{font:9px 'DM Mono';white-space:nowrap}
+.screener-empty{padding:35px 12px;text-align:center;color:#80949e;font-size:10px}
+.book-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:16px 0}
+.book-summary>div{padding:12px;border:1px solid #233741;border-radius:6px;background:#0d171e}
+.book-summary small{display:block;color:#8296a0;font:700 8px 'DM Mono';letter-spacing:.6px}
+.book-summary b{display:block;margin-top:7px;color:#d4e1e6;font:700 15px 'DM Mono'}
+.book-columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.book-columns>div{min-width:0;border:1px solid #20323b;border-radius:6px;overflow:hidden;background:#0c151c}
+.book-columns h3{margin:0;padding:11px 10px;background:#14222a;color:#93aaaF;font:700 9px 'DM Mono';letter-spacing:.8px}
+.book-row{position:relative;display:grid;grid-template-columns:1fr .8fr .8fr;gap:5px;padding:7px 9px;border-top:1px solid #1b2b34;font:8px 'DM Mono';color:#9eb0b9}
+.book-row span:first-child{font-weight:700}
+.book-row b{text-align:right;font-weight:500;color:#aebdc4}
+.bid-row span:first-child{color:#62c9a6}.ask-row span:first-child{color:#df8585}
+.orderbook-card{min-height:400px}
+@media(max-width:700px){.book-columns{grid-template-columns:1fr}.book-row{font-size:9px}.book-summary b{font-size:12px}.live-screener-table .module-table-head,.live-screener-table .module-table-row{grid-template-columns:1fr 1fr .8fr}.live-screener-table .module-table-head span:nth-child(n+4),.live-screener-table .module-table-row span:nth-child(n+4){display:none}}
