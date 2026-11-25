@@ -7,6 +7,7 @@ import {
   Sparkles, Star, Waves, X
 } from "lucide-react";
 import "./style.css";
+import LiveChart from "./LiveChart.jsx";
 
 const navigation = [
   { label: "Overview", icon: LayoutDashboard },
@@ -73,7 +74,7 @@ function App() {
           <section className="card chart-card">
             <div className="card-heading chart-heading"><div><div className="section-kicker">PRICE ACTION</div><div className="instrument-title"><strong>{current.symbol}</strong><span>{current.name}</span><span className="feed-badge"><i/> NO FEED</span></div></div><div className="chart-actions"><button className="control-button"><Star size={14}/> Watch</button><button className="control-button"><Settings2 size={14}/></button></div></div>
             <div className="chart-toolbar"><div className="timeframes">{["1m","5m","15m","1H","4H","1D","1W"].map(t=><button key={t} className={period===t?"time-active":""} onClick={()=>setPeriod(t)}>{t}</button>)}</div><div className="chart-tools"><span><BarChart3 size={14}/> Indicators</span><span><Layers3 size={14}/> Layout</span></div></div>
-            <div className="chart-stage"><div className="chart-grid-lines"><i/><i/><i/><i/><i/></div><div className="chart-empty-state"><div className="chart-empty-icon"><CandlestickChart size={25}/></div><b>Waiting for market data</b><p>Connect a supported market feed to load live candles, volume and chart tools.</p><span className="chart-empty-note">NO DEMO PRICES · NO SIMULATED LIVE FEED</span></div><div className="chart-axis"><span>PRICE</span><span>TIME · {period}</span></div></div>
+            <LiveChart symbol={selected} period={period}/>
             <div className="chart-footer"><span><CircleDot size={13}/> Chart engine <b>READY</b></span><span>Data source <b>NOT CONNECTED</b></span><span>Timezone <b>UTC</b></span></div>
           </section>
 
