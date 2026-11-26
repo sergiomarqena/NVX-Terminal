@@ -55,7 +55,7 @@ export default function LiveChart({symbol,period}) {
       ledger.filter(t=>t.symbol===symbol&&String(t.timeframe).toLowerCase()===wanted).forEach(t=>{
         const gi=all.findIndex(a=>a.time>=Number(t.time));if(gi<0||gi>=end)return;
         const local=gi-start,sx=local<0?0:X(Math.min(rows.length-1,local));
-        const closed=t.closedAt?all.findIndex(a=>a.time>=Number(t.closedAt)):-1;
+        const closed=t.closedAt?all.findIndex(a=>a.time>=Number(t.closedAt)):-1;if(closed>=0&&closed<start)return;
         const ex=closed>=start?X(Math.min(rows.length-1,closed-start)):pw;
         const right=Math.max(sx+2,Math.min(pw,ex));
         const entryY=Y(Number(t.entry)),tpY=Y(Number(t.tp)),slY=Y(Number(t.sl));
