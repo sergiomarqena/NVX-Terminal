@@ -53,7 +53,7 @@ export default function LiveChart({symbol,period}) {
       const ledger=JSON.parse(localStorage.getItem("nvx-scalping-ledger")||"[]");
       const wanted=String(period).toLowerCase();
       ledger.filter(t=>t.symbol===symbol&&String(t.timeframe).toLowerCase()===wanted).forEach(t=>{
-        const gi=all.findIndex(a=>a.time>=Number(t.time));if(gi<0)return;
+        const gi=all.findIndex(a=>a.time>=Number(t.time));if(gi<0||gi>=end)return;
         const local=gi-start,sx=local<0?0:X(Math.min(rows.length-1,local));
         const closed=t.closedAt?all.findIndex(a=>a.time>=Number(t.closedAt)):-1;
         const ex=closed>=start?X(Math.min(rows.length-1,closed-start)):pw;
@@ -71,7 +71,7 @@ export default function LiveChart({symbol,period}) {
     }catch{}
     if(v.current.crossX!==null&&tool==="crosshair"){x.strokeStyle="#a3b4bd";x.setLineDash([3,4]);x.beginPath();x.moveTo(v.current.crossX,top);x.lineTo(v.current.crossX,pb);x.moveTo(0,v.current.crossY);x.lineTo(pw,v.current.crossY);x.stroke();x.setLineDash([]);}
     if(ind.rsi){const vals=rsi(rows),rh=rsiH-8,ry=pb+5;x.fillStyle="#0d1921";x.fillRect(0,ry,pw,rh);[30,50,70].forEach(n=>{const yy=ry+(100-n)/100*rh;x.strokeStyle="#293a43";x.setLineDash([3,3]);x.beginPath();x.moveTo(0,yy);x.lineTo(pw,yy);x.stroke();x.setLineDash([]);});x.beginPath();let started=false;vals.forEach((n,i)=>{if(n===null)return;const xx=X(i),yy=ry+(100-n)/100*rh;if(!started){x.moveTo(xx,yy);started=true;}else x.lineTo(xx,yy);});x.strokeStyle="#b89de7";x.stroke();x.fillStyle="#a99bd1";x.font="8px 'DM Mono'";x.fillText("RSI 14",5,ry+10);}
-  },[ind,drawings,tool,status]);
+  },[ind,drawings,tool,status,symbol,period]);
 
   useEffect(()=>{draw();},[draw,revision]);useEffect(()=>{const c=canvasRef.current;if(!c)return;const ro=new ResizeObserver(draw);ro.observe(c);return()=>ro.disconnect();},[draw]);
   useEffect(()=>{
