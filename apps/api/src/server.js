@@ -126,7 +126,7 @@ const server=http.createServer(async(req,res)=>{
   }
   return send(res,404,{error:"Route not found"});
 });
-scalpWss=new WebSocketServer({server,path:"/ws/scalping"});
+scalpWss=new WebSocketServer({server,path:"/ws/scalping",verifyClient:(info,done)=>done(info.origin===FRONTEND_ORIGIN,false,403)});
 scalpWss.on("connection",socket=>socket.send(JSON.stringify({type:"connected",service:"NORDVEX scalping alerts",persistent:!!db})));
-if(db)dbReady=db.query("CREATE TABLE IF NOT EXISTS nvx_scalping_events(id BIGSERIAL PRIMARY KEY,event_id TEXT UNIQUE NOT NULL,payload JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+if(db)dbReady=db.query("CREATE TABLE IF NOT EXISTS nvx_scalping_events(id BIGSERIAL PRIMARY KEY,event_id TEXT UNIQUE NOT NULL,payload JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now())").catch(e=>{console.error("Scalping event table init failed:",e.message);return null;});
 server.listen(PORT,"0.0.0.0",()=>console.log("NORDVEX API listening on "+PORT));
