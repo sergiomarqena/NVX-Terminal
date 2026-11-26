@@ -30,11 +30,11 @@ function engine(a,old,opts){
  return {trades:trades.slice(0,150),structure:structure===1?"BULLISH":structure===-1?"BEARISH":"NEUTRAL"};
 }
 export default function ScalpingEngine({symbol="BTCUSDT",period="5m"}){
- const [exchange,setExchange]=useState("binance"),[tf,setTf]=useState(period.toLowerCase()),[bars,setBars]=useState([]),[trades,setTrades]=useState(loadSaved),[structure,setStructure]=useState("NEUTRAL"),[status,setStatus]=useState("CONNECTING"),[error,setError]=useState(""),[rr,setRr]=useState(2),[gate,setGate]=useState(true),[be,setBe]=useState(true),[notify,setNotify]=useState(false),[webhook,setWebhook]=useState(localStorage.getItem("nvx-scalping-hook")||"");
+ const [exchange,setExchange]=useState("binance"),[tf,setTf]=useState(period.toLowerCase()),[bars,setBars]=useState([]),[trades,setTrades]=useState(loadSaved),[structure,setStructure]=useState("NEUTRAL"),[status,setStatus]=useState("CONNECTING"),[error,setError]=useState(""),[rr,setRr]=useState(2),[gate,setGate]=useState(true),[be,setBe]=useState(true),[notify,setNotify]=useState(false);
  const prevCount=useRef(0);
  useEffect(()=>setTf(period.toLowerCase()),[period]);
  useEffect(()=>{localStorage.setItem("nvx-scalping-ledger",JSON.stringify(trades))},[trades]);
- useEffect(()=>{localStorage.setItem("nvx-scalping-hook",webhook)},[webhook]);
+
  useEffect(()=>{
   let dead=false,ws=null,retry=null,rows=[];
   const load=async()=>{
@@ -51,7 +51,7 @@ export default function ScalpingEngine({symbol="BTCUSDT",period="5m"}){
  },[symbol,exchange,tf]);
  useEffect(()=>{if(!bars.length)return;let out=engine(bars,trades,{rr,gate,be,symbol,tf});let ids=new Set(trades.map(t=>t.id)),fresh=out.trades.filter(t=>!ids.has(t.id));for(let t of fresh){let msg="NORDVEX "+t.side+" "+symbol+" "+tf+" Entry "+t.entry+" TP "+t.tp+" SL "+t.sl+" RR 1:"+rr;
   if(notify&&"Notification"in window&&Notification.permission==="granted")new Notification("NORDVEX "+t.side,{body:msg});
-  if(webhook)fetch(API+"/api/v1/scalping/alerts",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...t,event:"ENTRY",webhookUrl:webhook})}).catch(()=>{});
+  if(webhook)fetch(API+"/api/v1/scalping/alerts",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...t,event:"ENTRY"})}).catch(()=>{});
  }setTrades(out.trades);setStructure(out.structure)},[bars,rr,gate,be,symbol,tf]);
  const stats=useMemo(()=>({tp:trades.filter(t=>t.status==="TP").length,sl:trades.filter(t=>t.status==="SL").length,rf:trades.filter(t=>t.status==="RISK-FREE").length,active:trades.filter(t=>t.status==="ACTIVE"||t.status==="RISK-FREE").length}),[trades]);
  const enable=async()=>{if(!("Notification"in window))return setError("Browser notifications are unavailable.");let p=await Notification.requestPermission();setNotify(p==="granted")};
@@ -59,5 +59,5 @@ export default function ScalpingEngine({symbol="BTCUSDT",period="5m"}){
  <div className="scalp-controls"><label>EXCHANGE <select value={exchange} onChange={e=>setExchange(e.target.value)}><option value="binance">BINANCE</option><option value="bybit">BYBIT</option><option value="mexc">MEXC</option></select></label><label>TIMEFRAME <select value={tf} onChange={e=>setTf(e.target.value)}>{intervals.map(x=><option key={x}>{x}</option>)}</select></label><label>R:R <select value={rr} onChange={e=>setRr(+e.target.value)}><option value="1.5">1:1.5</option><option value="2">1:2</option><option value="2.5">1:2.5</option><option value="3">1:3</option></select></label><label className="scalp-check"><input type="checkbox" checked={gate} onChange={e=>setGate(e.target.checked)}/> STRUCTURE FILTER</label><label className="scalp-check"><input type="checkbox" checked={be} onChange={e=>setBe(e.target.checked)}/> BREAK EVEN +1R</label><button onClick={enable}>ENABLE NOTIFICATIONS</button></div>
  {error&&<div className="scalp-error">{error}</div>}<div className="scalp-stats">{[["ACTIVE",stats.active],["STRUCTURE",structure],["TP CLOSED",stats.tp],["SL CLOSED",stats.sl],["RISK-FREE",stats.rf]].map(x=><div key={x[0]}><small>{x[0]}</small><b>{x[1]}</b></div>)}</div>
  <div className="scalp-ledger-head"><b>TRADE LEDGER · {symbol}</b><span>{trades.length} SAVED</span></div><div className="scalp-trades">{trades.filter(t=>t.symbol===symbol).slice(0,35).map(t=><article className="scalp-trade" key={t.id}><div className="scalp-trade-title"><b className={t.side==="BUY"?"buy":"sell"}>{t.side}</b><span>{t.reason}</span><em className={"trade-state "+(t.status==="TP"?"tp":t.status==="SL"?"sl":t.status==="RISK-FREE"?"rf":"")}>{t.status}</em></div><div className="scalp-levels"><span>ENTRY <b>{t.entry}</b></span><span>TP <b>{t.tp}</b></span><span>SL <b>{t.sl}</b></span><span>R:R <b>1:{t.rr}</b></span><span>AGE <b>{Math.max(0,bars.length-1-t.barIndex)} bars</b></span></div></article>)}{!trades.some(t=>t.symbol===symbol)&&<div className="scalp-empty">Waiting for a confirmed setup. A signal is created only after candle close.</div>}</div>
- <div className="scalp-webhook"><label>WEBHOOK URL <input value={webhook} onChange={e=>setWebhook(e.target.value)} placeholder="Optional external alert URL"/></label><small>TradingView alert integration will use the NORDVEX API webhook. Never enter exchange secrets here.</small></div><div className="scalp-foot">No accuracy guarantee. Backtest and forward-test before relying on signals.</div></section>
+ {lastAlert&&<div className="scalp-last-alert">{lastAlert}</div>}<div className="scalp-foot">No accuracy guarantee. Backtest and forward-test before relying on signals.</div></section>
 }
