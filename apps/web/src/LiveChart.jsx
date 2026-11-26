@@ -48,6 +48,27 @@ export default function LiveChart({symbol,period}) {
       else if(d.type==="fib"){const diff=d.b.price-d.a.price;[0,.236,.382,.5,.618,.786,1].forEach(q=>{const yy=Y(d.b.price-diff*q);x.beginPath();x.moveTo(Math.min(x1,x2),yy);x.lineTo(pw,yy);x.stroke();x.fillText((q*100).toFixed(1)+"%",Math.min(x1,x2)+4,yy-3);});}
       else{x.beginPath();x.moveTo(x1,y1);x.lineTo(x2,y2);x.stroke();}};
     drawings.forEach(paint);if(v.current.preview)paint(v.current.preview);
+    // Persistent NORDVEX trade overlays are read from the same local ledger as the signal panel.
+    try{
+      const ledger=JSON.parse(localStorage.getItem("nvx-scalping-ledger")||"[]");
+      const wanted=String(period).toLowerCase();
+      ledger.filter(t=>t.symbol===symbol&&String(t.timeframe).toLowerCase()===wanted).forEach(t=>{
+        const gi=all.findIndex(a=>a.time>=Number(t.time));if(gi<0)return;
+        const local=gi-start,sx=local<0?0:X(Math.min(rows.length-1,local));
+        const closed=t.closedAt?all.findIndex(a=>a.time>=Number(t.closedAt)):-1;
+        const ex=closed>=start?X(Math.min(rows.length-1,closed-start)):pw;
+        const right=Math.max(sx+2,Math.min(pw,ex));
+        const entryY=Y(Number(t.entry)),tpY=Y(Number(t.tp)),slY=Y(Number(t.sl));
+        x.fillStyle="rgba(35,164,132,.16)";x.fillRect(sx,Math.min(entryY,tpY),right-sx,Math.abs(entryY-tpY));
+        x.strokeStyle="rgba(66,194,158,.65)";x.strokeRect(sx,Math.min(entryY,tpY),right-sx,Math.abs(entryY-tpY));
+        x.fillStyle="rgba(207,69,83,.17)";x.fillRect(sx,Math.min(entryY,slY),right-sx,Math.abs(entryY-slY));
+        x.strokeStyle="rgba(220,91,103,.7)";x.strokeRect(sx,Math.min(entryY,slY),right-sx,Math.abs(entryY-slY));
+        x.font="700 9px 'DM Mono'";x.textAlign="left";x.fillStyle=t.side==="BUY"?"#75d7b6":"#ef9292";
+        x.fillText(t.side+" · "+t.status,sx+4,Math.max(top+10,entryY-5));
+        x.fillStyle="#71d3b3";x.fillText("TP "+Number(t.tp).toLocaleString("en-US",{maximumFractionDigits:5}),Math.min(pw-90,sx+5),Math.max(top+9,tpY-3));
+        x.fillStyle="#ed8888";x.fillText("SL "+Number(t.sl).toLocaleString("en-US",{maximumFractionDigits:5}),Math.min(pw-90,sx+5),Math.min(pb-3,slY+11));
+      });
+    }catch{}
     if(v.current.crossX!==null&&tool==="crosshair"){x.strokeStyle="#a3b4bd";x.setLineDash([3,4]);x.beginPath();x.moveTo(v.current.crossX,top);x.lineTo(v.current.crossX,pb);x.moveTo(0,v.current.crossY);x.lineTo(pw,v.current.crossY);x.stroke();x.setLineDash([]);}
     if(ind.rsi){const vals=rsi(rows),rh=rsiH-8,ry=pb+5;x.fillStyle="#0d1921";x.fillRect(0,ry,pw,rh);[30,50,70].forEach(n=>{const yy=ry+(100-n)/100*rh;x.strokeStyle="#293a43";x.setLineDash([3,3]);x.beginPath();x.moveTo(0,yy);x.lineTo(pw,yy);x.stroke();x.setLineDash([]);});x.beginPath();let started=false;vals.forEach((n,i)=>{if(n===null)return;const xx=X(i),yy=ry+(100-n)/100*rh;if(!started){x.moveTo(xx,yy);started=true;}else x.lineTo(xx,yy);});x.strokeStyle="#b89de7";x.stroke();x.fillStyle="#a99bd1";x.font="8px 'DM Mono'";x.fillText("RSI 14",5,ry+10);}
   },[ind,drawings,tool,status]);
