@@ -147,7 +147,12 @@ if longSignal or shortSignal
             box.delete(array.shift(rewardBoxes))
             box.delete(array.shift(riskBoxes))
             label.delete(array.shift(tradeLabels))
-            array.shift(entries)\n            array.shift(stops)\n            array.shift(targets)\n            array.shift(dirs)\n            array.shift(states)\n            array.shift(born)
+            array.shift(entries)
+            array.shift(stops)
+            array.shift(targets)
+            array.shift(dirs)
+            array.shift(states)
+            array.shift(born)
 
 // Update all active trades. If SL and TP are both touched in one OHLC bar, resolve conservatively as SL first.
 if barstate.isconfirmed and array.size(entries) > 0
@@ -178,9 +183,11 @@ if barstate.isconfirmed and array.size(entries) > 0
                 box rb = array.get(rewardBoxes, i)
                 box sb = array.get(riskBoxes, i)
                 if not na(rb)
-                    box.set_extend(rb, extend.none)\n                    box.set_right(rb, bar_index)
+                    box.set_extend(rb, extend.none)
+                    box.set_right(rb, bar_index)
                 if not na(sb)
-                    box.set_extend(sb, extend.none)\n                    box.set_right(sb, bar_index)
+                    box.set_extend(sb, extend.none)
+                    box.set_right(sb, bar_index)
                 label.set_text(array.get(tradeLabels, i), (d == 1 ? "BUY" : "SELL") + " · SL HIT")
             else if targetHit
                 array.set(states, i, 2)
@@ -189,9 +196,11 @@ if barstate.isconfirmed and array.size(entries) > 0
                 box rb = array.get(rewardBoxes, i)
                 box sb = array.get(riskBoxes, i)
                 if not na(rb)
-                    box.set_extend(rb, extend.none), box.set_right(rb, bar_index)
+                    box.set_extend(rb, extend.none)
+                    box.set_right(rb, bar_index)
                 if not na(sb)
-                    box.set_extend(sb, extend.none), box.set_right(sb, bar_index)
+                    box.set_extend(sb, extend.none)
+                    box.set_right(sb, bar_index)
                 label.set_text(array.get(tradeLabels, i), (d == 1 ? "BUY" : "SELL") + " · TP HIT")
 
 // Latest active OB zones; boxes are visual guides, not future-looking signals.
