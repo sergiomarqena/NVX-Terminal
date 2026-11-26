@@ -8,10 +8,13 @@ import {
 } from "lucide-react";
 import "./style.css";
 import LiveChart from "./LiveChart.jsx";
+import ScalpingEngine from "./ScalpingEngine.jsx";
+import "./scalping.css";
 
 const navigation = [
   { label: "Overview", icon: LayoutDashboard },
   { label: "Charting", icon: CandlestickChart },
+  { label: "Scalping Engine", icon: Activity },
   { label: "Screener", icon: SlidersHorizontal },
   { label: "Order Flow", icon: Waves },
   { label: "Market Radar", icon: RadioTower },
@@ -146,6 +149,7 @@ function App() {
             <LiveChart symbol={selected} period={period}/>
             <div className="module-note"><b>Chart tools roadmap</b><span>Drawing tools, indicators, volume, multi-chart layouts and saved templates are the next chart-engine layer.</span></div>
           </div>}
+          {active === "Scalping Engine" && <ScalpingEngine symbol={selected} period={period}/>}
           {active === "Screener" && <div className="card module-card">
             <div className="card-heading"><div><div className="section-kicker">LIVE MARKET SCANNER</div><h2>Top USDT markets by quote volume</h2></div><span className="subtle-tag">{screenerStatus}</span></div>
             <div className="screener-controls"><label>EXCHANGE <select value={screenerExchange} onChange={e=>setScreenerExchange(e.target.value)}><option value="binance">BINANCE</option><option value="bybit">BYBIT</option><option value="mexc">MEXC</option></select></label><span>Refreshes every 10 seconds · exchange-native 24h statistics</span></div>
