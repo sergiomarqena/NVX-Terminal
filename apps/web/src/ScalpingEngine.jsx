@@ -30,10 +30,18 @@ function engine(a,old,opts){
  return {trades:trades.slice(0,150),structure:structure===1?"BULLISH":structure===-1?"BEARISH":"NEUTRAL"};
 }
 export default function ScalpingEngine({symbol="BTCUSDT",period="5m"}){
- const [exchange,setExchange]=useState("binance"),[tf,setTf]=useState(period.toLowerCase()),[bars,setBars]=useState([]),[trades,setTrades]=useState(loadSaved),[structure,setStructure]=useState("NEUTRAL"),[status,setStatus]=useState("CONNECTING"),[error,setError]=useState(""),[rr,setRr]=useState(2),[gate,setGate]=useState(true),[be,setBe]=useState(true),[notify,setNotify]=useState(false);
- const prevCount=useRef(0);
+ const [exchange,setExchange]=useState("binance"),[tf,setTf]=useState(period.toLowerCase()),[bars,setBars]=useState([]),[trades,setTrades]=useState(loadSaved),[structure,setStructure]=useState("NEUTRAL"),[status,setStatus]=useState("CONNECTING"),[error,setError]=useState(""),[rr,setRr]=useState(2),[gate,setGate]=useState(true),[be,setBe]=useState(true),[notify,setNotify]=useState(false),[lastAlert,setLastAlert]=useState("");
+
  useEffect(()=>setTf(period.toLowerCase()),[period]);
  useEffect(()=>{localStorage.setItem("nvx-scalping-ledger",JSON.stringify(trades))},[trades]);
+ useEffect(()=>{
+  let dead=false,ws=null,retry=null;
+  const connect=()=>{ws=new WebSocket(API.replace(/^http/,"ws")+"/ws/scalping");
+   ws.onmessage=e=>{try{const m=JSON.parse(e.data);if(m.type!=="scalping-alert")return;const p=m.payload||{};const msg=p.source+" "+p.event+" · "+p.side+" "+p.symbol+" · Entry "+p.entry+" · TP "+p.tp+" · SL "+p.sl;setLastAlert(msg);if(notify&&"Notification"in window&&Notification.permission==="granted")new Notification("NORDVEX "+p.event,{body:msg})}catch{}};
+   ws.onclose=()=>{if(!dead)retry=setTimeout(connect,2500)};
+  };connect();return()=>{dead=true;clearTimeout(retry);ws?.close()};
+ },[notify]);
+
 
  useEffect(()=>{
   let dead=false,ws=null,retry=null,rows=[];
@@ -51,7 +59,7 @@ export default function ScalpingEngine({symbol="BTCUSDT",period="5m"}){
  },[symbol,exchange,tf]);
  useEffect(()=>{if(!bars.length)return;let out=engine(bars,trades,{rr,gate,be,symbol,tf});let ids=new Set(trades.map(t=>t.id)),fresh=out.trades.filter(t=>!ids.has(t.id));for(let t of fresh){let msg="NORDVEX "+t.side+" "+symbol+" "+tf+" Entry "+t.entry+" TP "+t.tp+" SL "+t.sl+" RR 1:"+rr;
   if(notify&&"Notification"in window&&Notification.permission==="granted")new Notification("NORDVEX "+t.side,{body:msg});
-  if(webhook)fetch(API+"/api/v1/scalping/alerts",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...t,event:"ENTRY"})}).catch(()=>{});
+  fetch(API+"/api/v1/scalping/alerts",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...t,event:"ENTRY"})}).catch(()=>{});
  }setTrades(out.trades);setStructure(out.structure)},[bars,rr,gate,be,symbol,tf]);
  const stats=useMemo(()=>({tp:trades.filter(t=>t.status==="TP").length,sl:trades.filter(t=>t.status==="SL").length,rf:trades.filter(t=>t.status==="RISK-FREE").length,active:trades.filter(t=>t.status==="ACTIVE"||t.status==="RISK-FREE").length}),[trades]);
  const enable=async()=>{if(!("Notification"in window))return setError("Browser notifications are unavailable.");let p=await Notification.requestPermission();setNotify(p==="granted")};
