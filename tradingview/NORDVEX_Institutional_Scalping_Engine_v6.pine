@@ -70,12 +70,14 @@ var float bearOBHigh = na
 var float bearOBLow = na
 var int bearOBBar = na
 if barstate.isconfirmed and (bullBreak or displacementUp)
+    bullOBBar := na
     for i = 1 to obLookback
         if close[i] < open[i] and na(bullOBBar)
             bullOBHigh := high[i]
             bullOBLow := low[i]
             bullOBBar := bar_index - i
 if barstate.isconfirmed and (bearBreak or displacementDown)
+    bearOBBar := na
     for i = 1 to obLookback
         if close[i] > open[i] and na(bearOBBar)
             bearOBHigh := high[i]
@@ -219,20 +221,20 @@ if showDashboard and barstate.islast
             if array.get(states, i) == 0 or array.get(states, i) == 1
                 activeCount += 1
                 latestIndex := i
-    string signalText = latestIndex == na ? "WAITING" : array.get(dirs, latestIndex) == 1 ? "BUY" : "SELL"
+    string signalText = na(latestIndex) ? "WAITING" : array.get(dirs, latestIndex) == 1 ? "BUY" : "SELL"
     string structureText = structure == 1 ? "BULLISH" : structure == -1 ? "BEARISH" : "NEUTRAL"
     string zoneText = bullRetest ? "BULLISH" : bearRetest ? "BEARISH" : "NONE"
-    string rfText = latestIndex == na ? "--" : array.get(states, latestIndex) == 1 ? "YES" : "NOT YET"
+    string rfText = na(latestIndex) ? "--" : array.get(states, latestIndex) == 1 ? "YES" : "NOT YET"
     table.cell(dash, 0, 0, syminfo.ticker, bgcolor=color.blue, text_color=color.white)
     table.cell(dash, 1, 0, "SCALPING 1:" + str.tostring(rr), bgcolor=color.blue, text_color=color.white)
     table.cell(dash, 0, 1, "Signal", bgcolor=color.new(color.gray, 65), text_color=color.white)
     table.cell(dash, 1, 1, signalText, bgcolor=signalText=="BUY"?color.teal:signalText=="SELL"?color.red:color.gray, text_color=color.white)
     table.cell(dash, 0, 2, "Entry", bgcolor=color.new(color.gray, 65), text_color=color.white)
-    table.cell(dash, 1, 2, latestIndex == na ? "--" : str.tostring(array.get(entries, latestIndex), format.mintick))
+    table.cell(dash, 1, 2, na(latestIndex) ? "--" : str.tostring(array.get(entries, latestIndex), format.mintick))
     table.cell(dash, 0, 3, "TP", bgcolor=color.new(color.gray, 65), text_color=color.white)
-    table.cell(dash, 1, 3, latestIndex == na ? "--" : str.tostring(array.get(targets, latestIndex), format.mintick), text_color=color.teal)
+    table.cell(dash, 1, 3, na(latestIndex) ? "--" : str.tostring(array.get(targets, latestIndex), format.mintick), text_color=color.teal)
     table.cell(dash, 0, 4, "SL", bgcolor=color.new(color.gray, 65), text_color=color.white)
-    table.cell(dash, 1, 4, latestIndex == na ? "--" : str.tostring(array.get(stops, latestIndex), format.mintick), text_color=color.red)
+    table.cell(dash, 1, 4, na(latestIndex) ? "--" : str.tostring(array.get(stops, latestIndex), format.mintick), text_color=color.red)
     table.cell(dash, 0, 5, "R:R", bgcolor=color.new(color.gray, 65), text_color=color.white)
     table.cell(dash, 1, 5, "1:" + str.tostring(rr), text_color=color.yellow)
     table.cell(dash, 0, 6, "Structure", bgcolor=color.new(color.gray, 65), text_color=color.white)
@@ -240,7 +242,7 @@ if showDashboard and barstate.islast
     table.cell(dash, 0, 7, "Watch Zone", bgcolor=color.new(color.gray, 65), text_color=color.white)
     table.cell(dash, 1, 7, zoneText, bgcolor=zoneText=="NONE"?color.gray:zoneText=="BULLISH"?color.teal:color.red, text_color=color.white)
     table.cell(dash, 0, 8, "Risk-Free / Age", bgcolor=color.new(color.gray, 65), text_color=color.white)
-    table.cell(dash, 1, 8, rfText + " · " + (latestIndex == na ? "--" : str.tostring(bar_index - array.get(born, latestIndex)) + " bars"), text_color=color.white)
+    table.cell(dash, 1, 8, rfText + " · " + (na(latestIndex) ? "--" : str.tostring(bar_index - array.get(born, latestIndex)) + " bars"), text_color=color.white)
 
 alertcondition(longSignal, title="NORDVEX BUY", message="NORDVEX confirmed BUY on {{ticker}} {{interval}}")
 alertcondition(shortSignal, title="NORDVEX SELL", message="NORDVEX confirmed SELL on {{ticker}} {{interval}}")
