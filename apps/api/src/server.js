@@ -31,6 +31,8 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==="OPTIONS"){res.writeHead(204);return res.end();}
   const url=new URL(req.url,"http://localhost");
   if(req.method==="POST"&&url.pathname==="/api/v1/scalping/alerts"){
+    const token=process.env.TRADINGVIEW_WEBHOOK_TOKEN;
+    if(origin!==FRONTEND_ORIGIN&&(!token||url.searchParams.get("token")!==token))return send(res,401,{error:"Webhook authentication failed. Configure TRADINGVIEW_WEBHOOK_TOKEN and append it as a query parameter."});
     try{
       let raw="";for await(const chunk of req){raw+=chunk;if(raw.length>65536)return send(res,413,{error:"Payload too large"});}
       const event=JSON.parse(raw||"{}");
