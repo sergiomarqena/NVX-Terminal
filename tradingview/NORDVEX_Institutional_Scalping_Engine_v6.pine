@@ -1,0 +1,246 @@
+//@version=6
+indicator("NORDVEX | Institutional Scalping Engine", shorttitle="NVX Scalping", overlay=true, max_boxes_count=500, max_labels_count=500, max_lines_count=500)
+
+// NORDVEX confirmed-bar engine. No lookahead: pivots are only accepted after rightBars close.
+string G_CORE = "01 · Signal Engine"
+int leftBars = input.int(3, "Swing left bars", minval=2, maxval=20, group=G_CORE)
+int rightBars = input.int(3, "Swing confirmation bars", minval=2, maxval=20, group=G_CORE)
+int atrLen = input.int(14, "ATR length", minval=5, group=G_CORE)
+float minBodyAtr = input.float(0.35, "Displacement body / ATR", minval=0.1, step=0.05, group=G_CORE)
+int obLookback = input.int(12, "Order block search bars", minval=2, maxval=40, group=G_CORE)
+bool useOB = input.bool(true, "Enable order-block retests", group=G_CORE)
+bool useSweep = input.bool(true, "Enable liquidity sweeps", group=G_CORE)
+bool requireStructure = input.bool(true, "Require matching structure", group=G_CORE)
+int cooldownBars = input.int(5, "Bars between new signals", minval=0, maxval=100, group=G_CORE)
+
+string G_RISK = "02 · Trade Management"
+float rr = input.float(2.0, "Reward / risk", minval=1.0, maxval=5.0, step=0.25, group=G_RISK)
+float slAtrPad = input.float(0.15, "Stop buffer (ATR)", minval=0, maxval=1, step=0.05, group=G_RISK)
+bool moveToBE = input.bool(true, "Move stop to entry at +1R", group=G_RISK)
+int maxTrades = input.int(80, "Maximum stored trades", minval=10, maxval=200, group=G_RISK)
+
+string G_VIEW = "03 · Display"
+bool showZones = input.bool(true, "Show trade risk / reward zones", group=G_VIEW)
+bool showStructure = input.bool(true, "Show structure labels", group=G_VIEW)
+bool showDashboard = input.bool(true, "Show live dashboard", group=G_VIEW)
+bool showOBZones = input.bool(true, "Show latest active order block", group=G_VIEW)
+
+string G_ALERT = "04 · Alerts"
+bool enableRuntimeAlerts = input.bool(true, "Enable alert() webhook messages", group=G_ALERT)
+string alertTag = input.string("NORDVEX", "Webhook source tag", group=G_ALERT)
+
+float atr = ta.atr(atrLen)
+float body = math.abs(close - open)
+float ph = ta.pivothigh(high, leftBars, rightBars)
+float pl = ta.pivotlow(low, leftBars, rightBars)
+var float swingHigh = na
+var float swingLow = na
+var int swingHighBar = na
+var int swingLowBar = na
+if not na(ph)
+    swingHigh := ph
+    swingHighBar := bar_index - rightBars
+if not na(pl)
+    swingLow := pl
+    swingLowBar := bar_index - rightBars
+
+var int structure = 0
+bool bullBreak = not na(swingHigh) and close > swingHigh and close[1] <= swingHigh
+bool bearBreak = not na(swingLow) and close < swingLow and close[1] >= swingLow
+if barstate.isconfirmed
+    if bullBreak
+        structure := 1
+        if showStructure
+            label.new(bar_index, low, "BOS ↑", style=label.style_label_up, color=color.new(color.teal, 15), textcolor=color.white, size=size.tiny)
+    if bearBreak
+        structure := -1
+        if showStructure
+            label.new(bar_index, high, "BOS ↓", style=label.style_label_down, color=color.new(color.red, 15), textcolor=color.white, size=size.tiny)
+
+bool bullSweep = not na(swingLow) and low < swingLow and close > swingLow and close > open
+bool bearSweep = not na(swingHigh) and high > swingHigh and close < swingHigh and close < open
+bool displacementUp = close > open and body >= atr * minBodyAtr and close > high[1]
+bool displacementDown = close < open and body >= atr * minBodyAtr and close < low[1]
+
+// Track the last opposing candle preceding a confirmed displacement / structure break.
+var float bullOBHigh = na
+var float bullOBLow = na
+var int bullOBBar = na
+var float bearOBHigh = na
+var float bearOBLow = na
+var int bearOBBar = na
+if barstate.isconfirmed and (bullBreak or displacementUp)
+    for i = 1 to obLookback
+        if close[i] < open[i] and na(bullOBBar)
+            bullOBHigh := high[i]
+            bullOBLow := low[i]
+            bullOBBar := bar_index - i
+if barstate.isconfirmed and (bearBreak or displacementDown)
+    for i = 1 to obLookback
+        if close[i] > open[i] and na(bearOBBar)
+            bearOBHigh := high[i]
+            bearOBLow := low[i]
+            bearOBBar := bar_index - i
+
+bool bullOBValid = not na(bullOBBar) and bar_index > bullOBBar and bar_index - bullOBBar <= 100
+bool bearOBValid = not na(bearOBBar) and bar_index > bearOBBar and bar_index - bearOBBar <= 100
+bool bullRetest = bullOBValid and low <= bullOBHigh and high >= bullOBLow and close > bullOBHigh and close > open
+bool bearRetest = bearOBValid and high >= bearOBLow and low <= bearOBHigh and close < bearOBLow and close < open
+bool structureLongOK = not requireStructure or structure == 1
+bool structureShortOK = not requireStructure or structure == -1
+
+bool rawLong = (useSweep and bullSweep) or (useOB and bullRetest)
+bool rawShort = (useSweep and bearSweep) or (useOB and bearRetest)
+var int lastSignalBar = na
+bool cooldownOK = na(lastSignalBar) or bar_index - lastSignalBar > cooldownBars
+bool longSignal = barstate.isconfirmed and rawLong and structureLongOK and cooldownOK and not na(atr)
+bool shortSignal = barstate.isconfirmed and rawShort and structureShortOK and cooldownOK and not na(atr)
+
+// Each trade has its own persistent levels and drawings. A signal is never deleted on later bars.
+var array<float> entries = array.new_float()
+var array<float> stops = array.new_float()
+var array<float> targets = array.new_float()
+var array<int> dirs = array.new_int()
+var array<int> states = array.new_int() // 0 active, 1 risk-free, 2 TP, -1 SL
+var array<int> born = array.new_int()
+var array<box> rewardBoxes = array.new_box()
+var array<box> riskBoxes = array.new_box()
+var array<label> tradeLabels = array.new_label()
+var int wins = 0
+var int losses = 0
+var int riskFreeCount = 0
+
+f_emit(string eventName, int direction, float entryPrice, float stopPrice, float targetPrice) =>
+    string side = direction == 1 ? "BUY" : "SELL"
+    string payload = '{"source":"' + alertTag + '","event":"' + eventName + '","symbol":"' + syminfo.ticker + '","ticker":"' + syminfo.tickerid + '","timeframe":"' + timeframe.period + '","side":"' + side + '","entry":' + str.tostring(entryPrice, format.mintick) + ',"sl":' + str.tostring(stopPrice, format.mintick) + ',"tp":' + str.tostring(targetPrice, format.mintick) + ',"rr":' + str.tostring(rr) + ',"bar_time":' + str.tostring(time) + '}'
+    if enableRuntimeAlerts
+        alert(payload, alert.freq_once_per_bar_close)
+
+if longSignal or shortSignal
+    int direction = longSignal ? 1 : -1
+    float entryPrice = close
+    float rawStop = direction == 1 ? (bullSweep ? low : math.min(low, nz(bullOBLow, low))) : (bearSweep ? high : math.max(high, nz(bearOBHigh, high)))
+    float stopPrice = direction == 1 ? rawStop - atr * slAtrPad : rawStop + atr * slAtrPad
+    float risk = math.abs(entryPrice - stopPrice)
+    float targetPrice = direction == 1 ? entryPrice + risk * rr : entryPrice - risk * rr
+    if risk > syminfo.mintick
+        lastSignalBar := bar_index
+        array.push(entries, entryPrice)
+        array.push(stops, stopPrice)
+        array.push(targets, targetPrice)
+        array.push(dirs, direction)
+        array.push(states, 0)
+        array.push(born, bar_index)
+        box rb = na
+        box sb = na
+        if showZones
+            rb := box.new(bar_index, direction == 1 ? targetPrice : entryPrice, bar_index + 1, direction == 1 ? entryPrice : targetPrice, border_color=color.new(color.teal, 25), bgcolor=color.new(color.teal, 84), extend=extend.right)
+            sb := box.new(bar_index, direction == 1 ? entryPrice : stopPrice, bar_index + 1, direction == 1 ? stopPrice : entryPrice, border_color=color.new(color.red, 25), bgcolor=color.new(color.red, 82), extend=extend.right)
+        array.push(rewardBoxes, rb)
+        array.push(riskBoxes, sb)
+        label lb = label.new(bar_index, direction == 1 ? low : high, (direction == 1 ? "BUY" : "SELL") + (bullSweep or bearSweep ? " · LIQUIDITY SWEEP" : " · OB RETEST") + "\nE " + str.tostring(entryPrice, format.mintick) + "\nTP " + str.tostring(targetPrice, format.mintick) + "\nSL " + str.tostring(stopPrice, format.mintick), style=direction == 1 ? label.style_label_up : label.style_label_down, color=direction == 1 ? color.new(color.teal, 0) : color.new(color.red, 0), textcolor=color.white, size=size.small)
+        array.push(tradeLabels, lb)
+        f_emit("ENTRY", direction, entryPrice, stopPrice, targetPrice)
+        if array.size(entries) > maxTrades
+            box.delete(array.shift(rewardBoxes))
+            box.delete(array.shift(riskBoxes))
+            label.delete(array.shift(tradeLabels))
+            array.shift(entries), array.shift(stops), array.shift(targets), array.shift(dirs), array.shift(states), array.shift(born)
+
+// Update all active trades. If SL and TP are both touched in one OHLC bar, resolve conservatively as SL first.
+if barstate.isconfirmed and array.size(entries) > 0
+    for i = 0 to array.size(entries) - 1
+        int state = array.get(states, i)
+        if state == 0 or state == 1
+            float e = array.get(entries, i)
+            float s = array.get(stops, i)
+            float t = array.get(targets, i)
+            int d = array.get(dirs, i)
+            bool beHit = moveToBE and state == 0 and (d == 1 ? high >= e + (e - s) : low <= e - (s - e))
+            if beHit
+                s := e
+                array.set(stops, i, s)
+                array.set(states, i, 1)
+                riskFreeCount += 1
+                box sb = array.get(riskBoxes, i)
+                if not na(sb)
+                    box.set_top(sb, math.max(e, s))
+                    box.set_bottom(sb, math.min(e, s))
+                f_emit("RISK_FREE", d, e, s, t)
+            bool stopHit = d == 1 ? low <= s : high >= s
+            bool targetHit = d == 1 ? high >= t : low <= t
+            if stopHit
+                array.set(states, i, -1)
+                losses += 1
+                f_emit("STOP", d, e, s, t)
+                box rb = array.get(rewardBoxes, i)
+                box sb = array.get(riskBoxes, i)
+                if not na(rb)
+                    box.set_extend(rb, extend.none), box.set_right(rb, bar_index)
+                if not na(sb)
+                    box.set_extend(sb, extend.none), box.set_right(sb, bar_index)
+                label.set_text(array.get(tradeLabels, i), (d == 1 ? "BUY" : "SELL") + " · SL HIT")
+            else if targetHit
+                array.set(states, i, 2)
+                wins += 1
+                f_emit("TARGET", d, e, s, t)
+                box rb = array.get(rewardBoxes, i)
+                box sb = array.get(riskBoxes, i)
+                if not na(rb)
+                    box.set_extend(rb, extend.none), box.set_right(rb, bar_index)
+                if not na(sb)
+                    box.set_extend(sb, extend.none), box.set_right(sb, bar_index)
+                label.set_text(array.get(tradeLabels, i), (d == 1 ? "BUY" : "SELL") + " · TP HIT")
+
+// Latest active OB zones; boxes are visual guides, not future-looking signals.
+var box bullZone = na
+var box bearZone = na
+if showOBZones and barstate.islast
+    if not na(bullZone)
+        box.delete(bullZone)
+    if not na(bearZone)
+        box.delete(bearZone)
+    if bullOBValid
+        bullZone := box.new(bullOBBar, bullOBHigh, bar_index + 5, bullOBLow, border_color=color.new(color.teal, 55), bgcolor=color.new(color.teal, 92), text="BULLISH OB", text_color=color.new(color.teal, 0))
+    if bearOBValid
+        bearZone := box.new(bearOBBar, bearOBHigh, bar_index + 5, bearOBLow, border_color=color.new(color.red, 55), bgcolor=color.new(color.red, 92), text="BEARISH OB", text_color=color.new(color.red, 0))
+
+plotshape(longSignal, title="Confirmed BUY", style=shape.triangleup, location=location.belowbar, color=color.new(color.teal, 0), size=size.tiny, text="BUY", textcolor=color.white)
+plotshape(shortSignal, title="Confirmed SELL", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, text="SELL", textcolor=color.white)
+plot(swingHigh, "Last confirmed swing high", color=color.new(color.red, 82), style=plot.style_linebr)
+plot(swingLow, "Last confirmed swing low", color=color.new(color.teal, 82), style=plot.style_linebr)
+
+var table dash = table.new(position.top_right, 2, 9, border_width=1, frame_color=color.new(color.blue, 0), border_color=color.new(color.gray, 35))
+if showDashboard and barstate.islast
+    int activeCount = 0
+    int latestIndex = na
+    if array.size(states) > 0
+        for i = 0 to array.size(states) - 1
+            if array.get(states, i) == 0 or array.get(states, i) == 1
+                activeCount += 1
+                latestIndex := i
+    string signalText = latestIndex == na ? "WAITING" : array.get(dirs, latestIndex) == 1 ? "BUY" : "SELL"
+    string structureText = structure == 1 ? "BULLISH" : structure == -1 ? "BEARISH" : "NEUTRAL"
+    string zoneText = bullRetest ? "BULLISH" : bearRetest ? "BEARISH" : "NONE"
+    string rfText = latestIndex == na ? "--" : array.get(states, latestIndex) == 1 ? "YES" : "NOT YET"
+    table.cell(dash, 0, 0, syminfo.ticker, bgcolor=color.blue, text_color=color.white)
+    table.cell(dash, 1, 0, "SCALPING 1:" + str.tostring(rr), bgcolor=color.blue, text_color=color.white)
+    table.cell(dash, 0, 1, "Signal", bgcolor=color.new(color.gray, 65), text_color=color.white)
+    table.cell(dash, 1, 1, signalText, bgcolor=signalText=="BUY"?color.teal:signalText=="SELL"?color.red:color.gray, text_color=color.white)
+    table.cell(dash, 0, 2, "Entry", bgcolor=color.new(color.gray, 65), text_color=color.white)
+    table.cell(dash, 1, 2, latestIndex == na ? "--" : str.tostring(array.get(entries, latestIndex), format.mintick))
+    table.cell(dash, 0, 3, "TP", bgcolor=color.new(color.gray, 65), text_color=color.white)
+    table.cell(dash, 1, 3, latestIndex == na ? "--" : str.tostring(array.get(targets, latestIndex), format.mintick), text_color=color.teal)
+    table.cell(dash, 0, 4, "SL", bgcolor=color.new(color.gray, 65), text_color=color.white)
+    table.cell(dash, 1, 4, latestIndex == na ? "--" : str.tostring(array.get(stops, latestIndex), format.mintick), text_color=color.red)
+    table.cell(dash, 0, 5, "R:R", bgcolor=color.new(color.gray, 65), text_color=color.white)
+    table.cell(dash, 1, 5, "1:" + str.tostring(rr), text_color=color.yellow)
+    table.cell(dash, 0, 6, "Structure", bgcolor=color.new(color.gray, 65), text_color=color.white)
+    table.cell(dash, 1, 6, structureText, bgcolor=structure==1?color.teal:structure==-1?color.red:color.gray, text_color=color.white)
+    table.cell(dash, 0, 7, "Watch Zone", bgcolor=color.new(color.gray, 65), text_color=color.white)
+    table.cell(dash, 1, 7, zoneText, bgcolor=zoneText=="NONE"?color.gray:zoneText=="BULLISH"?color.teal:color.red, text_color=color.white)
+    table.cell(dash, 0, 8, "Risk-Free / Age", bgcolor=color.new(color.gray, 65), text_color=color.white)
+    table.cell(dash, 1, 8, rfText + " · " + (latestIndex == na ? "--" : str.tostring(bar_index - array.get(born, latestIndex)) + " bars"), text_color=color.white)
+
+alertcondition(longSignal, title="NORDVEX BUY", message="NORDVEX confirmed BUY on {{ticker}} {{interval}}")
+alertcondition(shortSignal, title="NORDVEX SELL", message="NORDVEX confirmed SELL on {{ticker}} {{interval}}")
