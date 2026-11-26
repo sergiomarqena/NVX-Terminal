@@ -5,7 +5,8 @@ const { Pool } = pg;
 
 const PORT=Number(process.env.PORT||3001);
 const db=process.env.DATABASE_URL?new Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:false},max:5}):null;
-let scalpWss=null;\nlet dbReady=Promise.resolve();
+let scalpWss=null;
+let dbReady=Promise.resolve();
 const FRONTEND_ORIGIN=process.env.FRONTEND_ORIGIN||"https://nvx-frontend-production.up.railway.app";
 const TIMEFRAMES=new Set(["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d","3d","1w","1M"]);
 const SYMBOL=/^[A-Z0-9]{5,20}$/;
