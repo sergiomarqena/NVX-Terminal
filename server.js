@@ -2,169 +2,37 @@ import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "node:http";
 
-const app = express();
-const server = createServer(app);
-const wss = new WebSocketServer({ noServer: true });
-const PORT = Number(process.env.PORT || 3000);
-const BASE = process.env.BINANCE_FUTURES_REST || "https://fapi.binance.com";
-const UPSTREAM = process.env.BINANCE_FUTURES_WS || "wss://fstream.binance.com/ws/!ticker@arr";
-const TIMEFRAMES = ["1m","5m","15m","1h","4h","12h","1d","2d","3d","1w"];
-const RSI_PERIOD = 14;
-let tickers = new Map();
-let symbols = [];
-let lastUniverseAt = 0;
-let scanCache = new Map();
-let upstream;
-let reconnectTimer;
-
-app.use(express.json({ limit: "32kb" }));
-app.use(express.static("public", { maxAge: "1h" }));
-
-function calcRsi(closes, period = RSI_PERIOD) {
-  if (!Array.isArray(closes) || closes.length < period + 1) return null;
-  let gain = 0, loss = 0;
-  for (let i = 1; i <= period; i++) {
-    const d = closes[i] - closes[i - 1];
-    if (d > 0) gain += d; else loss -= d;
-  }
-  let avgGain = gain / period, avgLoss = loss / period;
-  for (let i = period + 1; i < closes.length; i++) {
-    const d = closes[i] - closes[i - 1];
-    avgGain = (avgGain * (period - 1) + Math.max(d, 0)) / period;
-    avgLoss = (avgLoss * (period - 1) + Math.max(-d, 0)) / period;
-  }
-  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
-  return 100 - 100 / (1 + avgGain / avgLoss);
-}
-async function getJson(url) {
-  const r = await fetch(url, { headers: { "User-Agent": "NORDVEX-Screener/1.0" }, signal: AbortSignal.timeout(12000) });
-  if (!r.ok) throw new Error(`Market API ${r.status}`);
-  return r.json();
-}
-async function refreshUniverse(force = false) {
-  if (!force && Date.now() - lastUniverseAt < 60000 && symbols.length) return;
-  const [info, stats] = await Promise.all([
-    getJson(`${BASE}/fapi/v1/exchangeInfo`),
-    getJson(`${BASE}/fapi/v1/ticker/24hr`)
-  ]);
-  const statMap = new Map(stats.map(x => [x.symbol, x]));
-  symbols = info.symbols.filter(s => s.status === "TRADING" && s.contractType === "PERPETUAL" && s.quoteAsset === "USDT")
-    .map(s => {
-      const t = statMap.get(s.symbol) || {};
-      return { symbol: s.symbol, base: s.baseAsset, quote: s.quoteAsset, price: Number(t.lastPrice || 0),
-        change24h: Number(t.priceChangePercent || 0), volume24h: Number(t.quoteVolume || 0),
-        high24h: Number(t.highPrice || 0), low24h: Number(t.lowPrice || 0) };
-    }).sort((a,b) => b.volume24h - a.volume24h);
-  lastUniverseAt = Date.now();
-}
-function broadcast(payload) {
-  const msg = JSON.stringify(payload);
-  for (const c of wss.clients) if (c.readyState === WebSocket.OPEN) c.send(msg);
-}
-function connectUpstream() {
-  clearTimeout(reconnectTimer);
-  upstream = new WebSocket(UPSTREAM);
-  upstream.on("message", raw => {
-    try {
-      const data = JSON.parse(raw.toString());
-      if (!Array.isArray(data)) return;
-      const updates = [];
-      for (const t of data) {
-        if (!t.s?.endsWith("USDT")) continue;
-        const row = { symbol:t.s, price:Number(t.c), change24h:Number(t.P), volume24h:Number(t.q), high24h:Number(t.h), low24h:Number(t.l), eventTime:Number(t.E || Date.now()) };
-        tickers.set(t.s, row); updates.push(row);
-      }
-      if (updates.length) broadcast({ type:"tickers", data:updates, at:Date.now() });
-    } catch {}
-  });
-  upstream.on("close", () => reconnectTimer = setTimeout(connectUpstream, 2500));
-  upstream.on("error", () => upstream?.close());
-}
-async function pool(items, limit, fn) {
-  let index = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (index < items.length) { const i = index++; try { await fn(items[i], i); } catch {} }
-  });
-  await Promise.all(workers);
-}
-async function scanSymbol(symbol, tf) {
-  const key = `${symbol}:${tf}`;
-  const cached = scanCache.get(key);
-  if (cached && Date.now() - cached.at < 90000) return cached.value;
-  const url = new URL(`${BASE}/fapi/v1/klines`);
-  url.searchParams.set("symbol", symbol); url.searchParams.set("interval", tf); url.searchParams.set("limit", "100");
-  const rows = await getJson(url);
-  const closes = rows.map(x => Number(x[4]));
-  const rsi = calcRsi(closes);
-  const value = { symbol, timeframe:tf, rsi, close:closes.at(-1), previousClose:closes.at(-2), change1h:tf==="1h" && closes.at(-2) ? ((closes.at(-1)-closes.at(-2))/closes.at(-2))*100 : null, candleTime:Number(rows.at(-1)?.[6] || 0) };
-  scanCache.set(key, { at:Date.now(), value });
-  return value;
-}
-app.get("/api/health", (_req,res) => res.json({ ok:true, service:"NORDVEX RSI Screener", upstream:upstream?.readyState === WebSocket.OPEN ? "connected":"reconnecting", symbols:symbols.length, clients:wss.clients.size }));
-app.get("/api/market/universe", async (_req,res) => {
-  try { await refreshUniverse(); res.json({ symbols, updatedAt:lastUniverseAt, source:"Binance USD-M perpetuals" }); }
-  catch(e) { res.status(503).json({ error:e.message }); }
-});
-app.get("/api/market/scan", async (req,res) => {
-  try {
-    await refreshUniverse();
-    const tf = String(req.query.timeframes || "15m,1h,4h,1d").split(",").filter(x => TIMEFRAMES.includes(x));
-    const limit = Math.max(10, Math.min(120, Number(req.query.limit || 60)));
-    const chosen = symbols.slice(0,limit);
-    const jobs = chosen.flatMap(s => tf.map(t => ({ symbol:s.symbol, tf:t })));
-    const results = [];
-    await pool(jobs, 5, async job => { const row = await scanSymbol(job.symbol, job.tf); if (row.rsi !== null) results.push(row); });
-    res.json({ data:results, timeframes:tf, scannedSymbols:chosen.length, totalSymbols:symbols.length, updatedAt:Date.now(), source:"Binance USD-M klines", note:"RSI uses Wilder smoothing, period 14, closed and latest available candle." });
-  } catch(e) { res.status(503).json({ error:e.message }); }
-});
-app.post("/api/alerts/test", async (req,res) => {
-  const { channel } = req.body || {};
-  try {
-    if (channel === "telegram") {
-      if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) return res.status(400).json({ error:"Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in Railway Variables first." });
-      const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({ chat_id:process.env.TELEGRAM_CHAT_ID, text:"🟢 NORDVEX RSI Screener test alert — connection successful." }) });
-      const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.description || "Telegram rejected the message");
-      return res.json({ ok:true, message:"Telegram test delivered." });
-    }
-    if (channel === "whatsapp") {
-      const { WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TO } = process.env;
-      if (!WHATSAPP_ACCESS_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_TO) return res.status(400).json({ error:"Set WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_TO in Railway Variables first." });
-      const r = await fetch(`https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, { method:"POST", headers:{"content-type":"application/json",authorization:`Bearer ${WHATSAPP_ACCESS_TOKEN}`}, body:JSON.stringify({ messaging_product:"whatsapp", to:WHATSAPP_TO, type:"text", text:{ body:"🟢 NORDVEX RSI Screener test alert — connection successful." } }) });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error?.message || "WhatsApp rejected the message");
-      return res.json({ ok:true, message:"WhatsApp test accepted." });
-    }
-    res.status(400).json({ error:"Choose telegram or whatsapp." });
-  } catch(e) { res.status(502).json({ error:e.message }); }
-});
-
-app.post("/api/alerts/notify", async (req,res) => {
-  const { symbol, timeframe, rsi, signal } = req.body || {};
-  if (!symbol || !timeframe || !Number.isFinite(Number(rsi)) || !["OVERBOUGHT","OVERSOLD","CONFLUENCE"].includes(signal)) return res.status(400).json({ error:"Invalid alert payload." });
-  const message = `NORDVEX RSI ALERT\\n${signal} · ${symbol} · ${timeframe}\\nRSI 14: ${Number(rsi).toFixed(1)}\\n${new Date().toUTCString()}`;
-  const results = [];
-  try {
-    if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
-      const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({ chat_id:process.env.TELEGRAM_CHAT_ID, text:message }) });
-      const d = await r.json(); results.push({ channel:"telegram", ok:r.ok && d.ok, error:d.description });
-    }
-    if (process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TO) {
-      const r = await fetch(`https://graph.facebook.com/v21.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, { method:"POST", headers:{"content-type":"application/json",authorization:`Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`}, body:JSON.stringify({ messaging_product:"whatsapp", to:process.env.WHATSAPP_TO, type:"text", text:{ body:message } }) });
-      const d = await r.json(); results.push({ channel:"whatsapp", ok:r.ok, error:d.error?.message });
-    }
-    if (!results.length) return res.status(400).json({ error:"No notification credentials configured in Railway Variables." });
-    return res.json({ ok:results.some(x=>x.ok), results });
-  } catch(e) { return res.status(502).json({ error:e.message }); }
-});
-
-server.on("upgrade", (req,socket,head) => {
-  if (req.url !== "/ws") return socket.destroy();
-  wss.handleUpgrade(req,socket,head,ws => wss.emit("connection",ws,req));
-});
-wss.on("connection", ws => {
-  ws.send(JSON.stringify({ type:"status", connected:upstream?.readyState === WebSocket.OPEN, symbols:symbols.length, at:Date.now() }));
-});
-server.listen(PORT, async () => {
-  console.log(`NORDVEX RSI Screener listening on ${PORT}`);
-  connectUpstream();
-  try { await refreshUniverse(true); } catch(e) { console.error("Initial universe load:",e.message); }
-});
+const app=express(),server=createServer(app),wss=new WebSocketServer({noServer:true});
+const PORT=Number(process.env.PORT||3000),BASE=process.env.BINANCE_FUTURES_REST||"https://fapi.binance.com";
+const TF=["1m","5m","15m","1h","4h","12h","1d","2d","3d","1w"],PERIOD=14;
+const MAX_COINS=Math.min(100,Math.max(20,Number(process.env.SCREENER_COINS||80)));
+const state={status:"BOOTING",coins:new Map(),universe:[],lastUpdate:0,streamCount:0,errors:[]};
+const sockets=[],clients=wss.clients;
+app.use(express.json({limit:"32kb"}));app.use(express.static("public",{maxAge:"1h"}));
+const num=x=>Number.isFinite(Number(x))?Number(x):0,round=x=>Number.isFinite(x)?Math.round(x*10)/10:null;
+function rsi(values){if(!values||values.length<PERIOD+1)return null;let g=0,l=0;for(let i=1;i<=PERIOD;i++){const d=values[i]-values[i-1];g+=Math.max(d,0);l+=Math.max(-d,0);}g/=PERIOD;l/=PERIOD;for(let i=PERIOD+1;i<values.length;i++){const d=values[i]-values[i-1];g=(g*13+Math.max(d,0))/14;l=(l*13+Math.max(-d,0))/14;}return l===0?(g===0?50:100):100-100/(1+g/l);}
+function zone(v){return v==null?"loading":v>=70?"overbought":v>=60?"strong":v<=30?"oversold":v<=40?"weak":"neutral";}
+function calc(c,tf){return round(rsi(c.frames[tf]?.closes||[]));}
+function snapshot(c){const rsis={};for(const tf of TF)rsis[tf]=calc(c,tf);const vals=Object.values(rsis).filter(Number.isFinite),avg=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;const up=["15m","1h","4h"].every(t=>rsis[t]!=null&&rsis[t]>50),down=["15m","1h","4h"].every(t=>rsis[t]!=null&&rsis[t]<50);return{symbol:c.symbol,base:c.base,price:c.price,change24h:c.change24h,change1h:c.change1h,quoteVolume:c.quoteVolume,openInterest:c.openInterest,rsis,averageRsi:round(avg),zone:zone(rsis["4h"]),confluence:up?"BULLISH":down?"BEARISH":"MIXED",divergence:c.divergence||"NONE",updatedAt:c.updatedAt||0};}
+function broadcast(type,data){const msg=JSON.stringify({type,data,at:Date.now()});for(const ws of clients)if(ws.readyState===WebSocket.OPEN)ws.send(msg);}
+async function get(url){const r=await fetch(url,{headers:{"user-agent":"NORDVEX-RSI-Screener/1.0"},signal:AbortSignal.timeout(12000)});if(!r.ok)throw new Error("Binance API HTTP "+r.status);return r.json();}
+async function pool(items,limit,fn){let i=0;await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(i<items.length){const item=items[i++];try{await fn(item);}catch(e){state.errors.push(e.message);if(state.errors.length>8)state.errors.shift();}}}));}
+async function refreshUniverse(){const [info,tickers]=await Promise.all([get(BASE+"/fapi/v1/exchangeInfo"),get(BASE+"/fapi/v1/ticker/24hr")]);const stats=new Map(tickers.map(t=>[t.symbol,t]));state.universe=info.symbols.filter(s=>s.status==="TRADING"&&s.contractType==="PERPETUAL"&&s.quoteAsset==="USDT").map(s=>{const t=stats.get(s.symbol)||{};return{symbol:s.symbol,base:s.baseAsset,price:num(t.lastPrice),change24h:num(t.priceChangePercent),quoteVolume:num(t.quoteVolume),high24h:num(t.highPrice),low24h:num(t.lowPrice)};}).sort((a,b)=>b.quoteVolume-a.quoteVolume);const prev=state.coins;state.coins=new Map();for(const x of state.universe.slice(0,MAX_COINS)){const old=prev.get(x.symbol);state.coins.set(x.symbol,{...x,frames:old?.frames||{},openInterest:old?.openInterest||null,updatedAt:Date.now(),divergence:old?.divergence||"NONE"});}state.lastUpdate=Date.now();}
+async function loadFrame(c,tf){const rows=await get(BASE+"/fapi/v1/klines?symbol="+c.symbol+"&interval="+tf+"&limit=100");c.frames[tf]={closes:rows.map(k=>num(k[4])),lastOpenTime:num(rows.at(-1)?.[0])};}
+async function loadHistory(){const jobs=[];for(const c of state.coins.values())for(const tf of TF)jobs.push([c,tf]);let done=0;await pool(jobs,10,async([c,tf])=>{await loadFrame(c,tf);done++;if(done%50===0)broadcast("progress",{done,total:jobs.length,percent:Math.round(done/jobs.length*100)});});}
+function detectDivergence(c){const f=c.frames["4h"];if(!f||f.closes.length<50)return"NONE";const a=f.closes.slice(-50),rv=a.map((_,i)=>rsi(a.slice(0,i+1)));const pivots=[];for(let i=5;i<a.length-5;i++){const hi=a.slice(i-5,i+6),v=a[i];if(v===Math.max(...hi))pivots.push({i,price:v,rsi:rv[i],type:"H"});if(v===Math.min(...hi))pivots.push({i,price:v,rsi:rv[i],type:"L"});}const highs=pivots.filter(x=>x.type==="H"&&x.rsi!=null),lows=pivots.filter(x=>x.type==="L"&&x.rsi!=null);if(highs.length>=2){const p=highs.at(-2),q=highs.at(-1);if(q.price>p.price&&q.rsi<p.rsi)return"BEARISH";}if(lows.length>=2){const p=lows.at(-2),q=lows.at(-1);if(q.price<p.price&&q.rsi>p.rsi)return"BULLISH";}return"NONE";}
+async function loadOI(){const coins=[...state.coins.values()];await pool(coins,8,async c=>{try{const d=await get(BASE+"/fapi/v1/openInterest?symbol="+c.symbol);c.openInterest=num(d.openInterest)*c.price;}catch{}});broadcast("market",{coins:[...state.coins.values()].map(snapshot),status:state.status,streamCount:state.streamCount});}
+const cooldown=new Map();
+async function notify(c,tf,oldV,newV){if(oldV==null||newV==null)return;let signal=null;if(oldV<70&&newV>=70)signal="OVERBOUGHT";if(oldV>30&&newV<=30)signal="OVERSOLD";if(!signal)return;const key=c.symbol+":"+tf+":"+signal,now=Date.now();if(now-(cooldown.get(key)||0)<30*60*1000)return;cooldown.set(key,now);const text="NORDVEX RSI ALERT\n"+c.symbol+" · "+tf+"\n"+signal+" · RSI 14: "+newV.toFixed(1)+"\nPrice: "+c.price+"\nBinance USD-M Perpetuals";const tasks=[];if(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID)tasks.push(fetch("https://api.telegram.org/bot"+process.env.TELEGRAM_BOT_TOKEN+"/sendMessage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:process.env.TELEGRAM_CHAT_ID,text})}));if(process.env.WHATSAPP_ACCESS_TOKEN&&process.env.WHATSAPP_PHONE_NUMBER_ID&&process.env.WHATSAPP_TO)tasks.push(fetch("https://graph.facebook.com/v21.0/"+process.env.WHATSAPP_PHONE_NUMBER_ID+"/messages",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+process.env.WHATSAPP_ACCESS_TOKEN},body:JSON.stringify({messaging_product:"whatsapp",to:process.env.WHATSAPP_TO,type:"text",text:{body:text}})}));await Promise.allSettled(tasks);}
+function connect(url,label){let ws,closed=false,delay=1200;const open=()=>{if(closed)return;ws=new WebSocket(url);ws.on("open",()=>{delay=1200;broadcast("connection",{label,status:"CONNECTED"});console.log("Connected",label);});ws.on("message",raw=>{try{const p=JSON.parse(raw.toString()),d=p.data||p;if(label==="ticker"){if(!Array.isArray(d))return;const updates=[];for(const t of d){const c=state.coins.get(t.s);if(c){c.price=num(t.c);c.change24h=num(t.P);c.quoteVolume=num(t.q);c.updatedAt=Date.now();updates.push({symbol:c.symbol,price:c.price,change24h:c.change24h,quoteVolume:c.quoteVolume,high24h:num(t.h),low24h:num(t.l)});}}if(updates.length)broadcast("tickers",updates);return;}const k=d.k,c=state.coins.get(k?.s);if(!c||!k)return;const tf=k.i,f=c.frames[tf];if(!f)return;const old=calc(c,tf),close=num(k.c);if(f.lastOpenTime===num(k.t))f.closes[f.closes.length-1]=close;else{f.closes.push(close);if(f.closes.length>120)f.closes.shift();f.lastOpenTime=num(k.t);}c.price=close;c.updatedAt=Date.now();if(k.x){if(tf==="4h")c.divergence=detectDivergence(c);notify(c,tf,old,calc(c,tf));}broadcast("coin",{coin:snapshot(c),timeframe:tf,closed:!!k.x});}catch(e){console.error("feed parse",e.message);}});ws.on("close",()=>{broadcast("connection",{label,status:"RECONNECTING"});if(!closed){setTimeout(open,delay);delay=Math.min(30000,delay*2);}});ws.on("error",()=>ws.close());};open();return()=>{closed=true;ws?.close();};}
+function startFeeds(){for(const s of sockets)s();sockets.length=0;const streams=[];for(const c of state.coins.values())for(const tf of TF)streams.push(c.symbol.toLowerCase()+"@kline_"+tf);state.streamCount=streams.length;for(let i=0;i<streams.length;i+=180)sockets.push(connect("wss://fstream.binance.com/stream?streams="+streams.slice(i,i+180).join("/"),"kline-"+i));sockets.push(connect("wss://fstream.binance.com/ws/!ticker@arr","ticker"));}
+app.get("/api/health",(_q,res)=>res.json({ok:true,service:"NORDVEX RSI Screener",status:state.status,coins:state.coins.size,listed:state.universe.length,streams:state.streamCount,errors:state.errors.slice(-4),updatedAt:state.lastUpdate}));
+app.get("/api/config",(_q,res)=>res.json({telegramConfigured:!!(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID),whatsappConfigured:!!(process.env.WHATSAPP_ACCESS_TOKEN&&process.env.WHATSAPP_PHONE_NUMBER_ID&&process.env.WHATSAPP_TO),timeframes:TF,coinLimit:MAX_COINS}));
+app.get("/api/market/universe",(_q,res)=>res.json({symbols:state.universe,updatedAt:state.lastUpdate,source:"Binance USD-M perpetuals"}));
+app.get("/api/market/snapshot",(_q,res)=>res.json({status:state.status,coins:[...state.coins.values()].map(snapshot),timeframes:TF,listed:state.universe.length,source:"Binance USD-M Futures",updatedAt:Date.now()}));
+app.get("/api/market/scan",(_q,res)=>res.json({data:[...state.coins.values()].flatMap(c=>TF.map(tf=>({symbol:c.symbol,timeframe:tf,rsi:calc(c,tf),close:c.price}))).filter(x=>x.rsi!=null),timeframes:TF,scannedSymbols:state.coins.size,totalSymbols:state.universe.length,updatedAt:Date.now(),source:"Binance live kline WebSocket + Wilder RSI"}));
+app.post("/api/alerts/test",async(req,res)=>{const channel=req.body?.channel;try{if(channel==="telegram"){if(!process.env.TELEGRAM_BOT_TOKEN||!process.env.TELEGRAM_CHAT_ID)return res.status(400).json({error:"Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in Railway Variables."});const r=await fetch("https://api.telegram.org/bot"+process.env.TELEGRAM_BOT_TOKEN+"/sendMessage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:process.env.TELEGRAM_CHAT_ID,text:"NORDVEX RSI Screener test alert — Telegram connected."})});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.description||"Telegram rejected message");return res.json({ok:true,message:"Telegram test delivered."});}if(channel==="whatsapp"){const{WHATSAPP_ACCESS_TOKEN,WHATSAPP_PHONE_NUMBER_ID,WHATSAPP_TO}=process.env;if(!WHATSAPP_ACCESS_TOKEN||!WHATSAPP_PHONE_NUMBER_ID||!WHATSAPP_TO)return res.status(400).json({error:"Set WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_TO in Railway Variables."});const r=await fetch("https://graph.facebook.com/v21.0/"+WHATSAPP_PHONE_NUMBER_ID+"/messages",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+WHATSAPP_ACCESS_TOKEN},body:JSON.stringify({messaging_product:"whatsapp",to:WHATSAPP_TO,type:"text",text:{body:"NORDVEX RSI Screener test alert — WhatsApp connected."}})});const d=await r.json();if(!r.ok)throw Error(d.error?.message||"WhatsApp rejected message");return res.json({ok:true,message:"WhatsApp test accepted."});}res.status(400).json({error:"Select Telegram or WhatsApp."});}catch(e){res.status(502).json({error:e.message});}});
+app.post("/api/alerts/notify",async(req,res)=>{const{symbol,timeframe,rsi:value,signal}=req.body||{};if(!symbol||!timeframe||!Number.isFinite(Number(value))||!["OVERBOUGHT","OVERSOLD","CONFLUENCE"].includes(signal))return res.status(400).json({error:"Invalid alert."});const message="NORDVEX RSI ALERT\n"+symbol+" · "+timeframe+"\n"+signal+" · RSI 14 "+Number(value).toFixed(1);const tasks=[];if(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID)tasks.push(fetch("https://api.telegram.org/bot"+process.env.TELEGRAM_BOT_TOKEN+"/sendMessage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:process.env.TELEGRAM_CHAT_ID,text:message})}));if(process.env.WHATSAPP_ACCESS_TOKEN&&process.env.WHATSAPP_PHONE_NUMBER_ID&&process.env.WHATSAPP_TO)tasks.push(fetch("https://graph.facebook.com/v21.0/"+process.env.WHATSAPP_PHONE_NUMBER_ID+"/messages",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+process.env.WHATSAPP_ACCESS_TOKEN},body:JSON.stringify({messaging_product:"whatsapp",to:process.env.WHATSAPP_TO,type:"text",text:{body:message}})}));if(!tasks.length)return res.status(400).json({error:"Notification credentials are not configured."});const results=await Promise.allSettled(tasks);res.json({ok:results.some(x=>x.status==="fulfilled"&&x.value.ok)});});
+server.on("upgrade",(req,socket,head)=>{if(req.url!=="/ws")return socket.destroy();wss.handleUpgrade(req,socket,head,ws=>wss.emit("connection",ws,req));});
+wss.on("connection",ws=>{ws.send(JSON.stringify({type:"hello",data:{status:state.status,coins:state.coins.size,listed:state.universe.length,streams:state.streamCount}}));if(state.coins.size)ws.send(JSON.stringify({type:"market",data:{coins:[...state.coins.values()].map(snapshot),status:state.status,streamCount:state.streamCount}}));});
+server.listen(PORT,"0.0.0.0",async()=>{console.log("NORDVEX RSI Screener on "+PORT);try{state.status="LOADING UNIVERSE";await refreshUniverse();state.status="LOADING RSI HISTORY";broadcast("status",{status:state.status});await loadHistory();state.status="LIVE";startFeeds();broadcast("market",{coins:[...state.coins.values()].map(snapshot),status:state.status,streamCount:state.streamCount});loadOI();setInterval(loadOI,120000);setInterval(async()=>{try{await refreshUniverse();broadcast("universe",{symbols:state.universe,updatedAt:state.lastUpdate});}catch(e){console.error("Universe refresh",e.message);}},60000);}catch(e){state.status="DEGRADED";state.errors.push(e.message);console.error("Startup failed",e);setTimeout(()=>process.exit(1),3000);}});
