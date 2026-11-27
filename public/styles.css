@@ -15,3 +15,6 @@
 tr{animation:rowFlash .8s ease}
 .plot-wrap{background-image:radial-gradient(ellipse at 50% 0%,#19223144,transparent 60%)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
+
+.backtest-result{margin-top:10px;padding:10px;background:#0d1820;border:1px solid #293b49;border-radius:7px;color:#b9c8d5;font-size:10px;line-height:1.55}
+.backtest-result b{color:#dce8ef}.backtest-result p{margin:5px 0}.backtest-result small{color:#8493a5;font-size:9px}
