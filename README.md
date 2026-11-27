@@ -8,7 +8,7 @@ A real-time, read-only crypto spot-market RSI dashboard.
 - MEXC public Spot REST market data; no exchange API key or account connection
 - Wilder RSI-14 on 1m, 5m, 15m, 1h, 4h, 1d and 1w candles; 12h, 2d and 3d are aggregated from 4h/daily candles
 - Refresh cadence: 1m every 5s, 5m/15m every 15s, higher frames every 60s
-- Default universe: top 80 USDT spot pairs by 24h quote volume. Set SCREENER_COINS to 20–100.
+- Default universe: top 100 USDT spot pairs by 24h quote volume. Set SCREENER_COINS to 20–100.
 - External alerts are sent only when a candle closes across the configured RSI threshold
 
 ## Run
