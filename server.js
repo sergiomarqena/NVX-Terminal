@@ -96,7 +96,7 @@ async function scanSymbol(symbol, tf) {
   const rows = await getJson(url);
   const closes = rows.map(x => Number(x[4]));
   const rsi = calcRsi(closes);
-  const value = { symbol, timeframe:tf, rsi, close:closes.at(-1), candleTime:Number(rows.at(-1)?.[6] || 0) };
+  const value = { symbol, timeframe:tf, rsi, close:closes.at(-1), previousClose:closes.at(-2), change1h:tf==="1h" && closes.at(-2) ? ((closes.at(-1)-closes.at(-2))/closes.at(-2))*100 : null, candleTime:Number(rows.at(-1)?.[6] || 0) };
   scanCache.set(key, { at:Date.now(), value });
   return value;
 }
@@ -136,6 +136,26 @@ app.post("/api/alerts/test", async (req,res) => {
     res.status(400).json({ error:"Choose telegram or whatsapp." });
   } catch(e) { res.status(502).json({ error:e.message }); }
 });
+
+app.post("/api/alerts/notify", async (req,res) => {
+  const { symbol, timeframe, rsi, signal } = req.body || {};
+  if (!symbol || !timeframe || !Number.isFinite(Number(rsi)) || !["OVERBOUGHT","OVERSOLD","CONFLUENCE"].includes(signal)) return res.status(400).json({ error:"Invalid alert payload." });
+  const message = `NORDVEX RSI ALERT\\n${signal} · ${symbol} · ${timeframe}\\nRSI 14: ${Number(rsi).toFixed(1)}\\n${new Date().toUTCString()}`;
+  const results = [];
+  try {
+    if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
+      const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({ chat_id:process.env.TELEGRAM_CHAT_ID, text:message }) });
+      const d = await r.json(); results.push({ channel:"telegram", ok:r.ok && d.ok, error:d.description });
+    }
+    if (process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TO) {
+      const r = await fetch(`https://graph.facebook.com/v21.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, { method:"POST", headers:{"content-type":"application/json",authorization:`Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`}, body:JSON.stringify({ messaging_product:"whatsapp", to:process.env.WHATSAPP_TO, type:"text", text:{ body:message } }) });
+      const d = await r.json(); results.push({ channel:"whatsapp", ok:r.ok, error:d.error?.message });
+    }
+    if (!results.length) return res.status(400).json({ error:"No notification credentials configured in Railway Variables." });
+    return res.json({ ok:results.some(x=>x.ok), results });
+  } catch(e) { return res.status(502).json({ error:e.message }); }
+});
+
 server.on("upgrade", (req,socket,head) => {
   if (req.url !== "/ws") return socket.destroy();
   wss.handleUpgrade(req,socket,head,ws => wss.emit("connection",ws,req));
