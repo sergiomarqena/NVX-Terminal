@@ -112,13 +112,21 @@ var int wins = 0
 var int losses = 0
 var int riskFreeCount = 0
 
+// One position at a time: avoid stacking overlapping historical signals.
+bool hasActiveTrade = false
+if array.size(states) > 0
+    for j = 0 to array.size(states) - 1
+        int st = array.get(states, j)
+        if st == 0 or st == 1
+            hasActiveTrade := true
+
 f_emit(string eventName, int direction, float entryPrice, float stopPrice, float targetPrice) =>
     string side = direction == 1 ? "BUY" : "SELL"
     string payload = '{"source":"' + alertTag + '","event":"' + eventName + '","symbol":"' + syminfo.ticker + '","ticker":"' + syminfo.tickerid + '","timeframe":"' + timeframe.period + '","side":"' + side + '","entry":' + str.tostring(entryPrice, format.mintick) + ',"sl":' + str.tostring(stopPrice, format.mintick) + ',"tp":' + str.tostring(targetPrice, format.mintick) + ',"rr":' + str.tostring(rr) + ',"bar_time":' + str.tostring(time) + '}'
     if enableRuntimeAlerts
         alert(payload, alert.freq_once_per_bar_close)
 
-if longSignal or shortSignal
+if (longSignal or shortSignal) and not hasActiveTrade
     int direction = longSignal ? 1 : -1
     float entryPrice = close
     float rawStop = direction == 1 ? (bullSweep ? low : math.min(low, nz(bullOBLow, low))) : (bearSweep ? high : math.max(high, nz(bearOBHigh, high)))
@@ -174,7 +182,7 @@ if barstate.isconfirmed and array.size(entries) > 0
                     box.set_top(sb, math.max(e, s))
                     box.set_bottom(sb, math.min(e, s))
                 f_emit("RISK_FREE", d, e, s, t)
-            bool stopHit = d == 1 ? low <= s : high >= s
+            bool stopHit = not beHit and (d == 1 ? low <= s : high >= s)
             bool targetHit = d == 1 ? high >= t : low <= t
             if stopHit
                 array.set(states, i, -1)
@@ -216,8 +224,8 @@ if showOBZones and barstate.islast
     if bearOBValid
         bearZone := box.new(bearOBBar, bearOBHigh, bar_index + 5, bearOBLow, border_color=color.new(color.red, 55), bgcolor=color.new(color.red, 92), text="BEARISH OB", text_color=color.new(color.red, 0))
 
-plotshape(longSignal, title="Confirmed BUY", style=shape.triangleup, location=location.belowbar, color=color.new(color.teal, 0), size=size.tiny, text="BUY", textcolor=color.white)
-plotshape(shortSignal, title="Confirmed SELL", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, text="SELL", textcolor=color.white)
+plotshape(longSignal and not hasActiveTrade, title="Confirmed BUY", style=shape.triangleup, location=location.belowbar, color=color.new(color.teal, 0), size=size.tiny, text="BUY", textcolor=color.white)
+plotshape(shortSignal and not hasActiveTrade, title="Confirmed SELL", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, text="SELL", textcolor=color.white)
 plot(swingHigh, "Last confirmed swing high", color=color.new(color.red, 82), style=plot.style_linebr)
 plot(swingLow, "Last confirmed swing low", color=color.new(color.teal, 82), style=plot.style_linebr)
 
@@ -253,5 +261,5 @@ if showDashboard and barstate.islast
     table.cell(dash, 0, 8, "Risk-Free / Age", bgcolor=color.new(color.gray, 65), text_color=color.white)
     table.cell(dash, 1, 8, rfText + " · " + (na(latestIndex) ? "--" : str.tostring(bar_index - array.get(born, latestIndex)) + " bars"), text_color=color.white)
 
-alertcondition(longSignal, title="NORDVEX BUY", message="NORDVEX confirmed BUY on {{ticker}} {{interval}}")
-alertcondition(shortSignal, title="NORDVEX SELL", message="NORDVEX confirmed SELL on {{ticker}} {{interval}}")
+alertcondition(longSignal and not hasActiveTrade, title="NORDVEX BUY", message="NORDVEX confirmed BUY on {{ticker}} {{interval}}")
+alertcondition(shortSignal and not hasActiveTrade, title="NORDVEX SELL", message="NORDVEX confirmed SELL on {{ticker}} {{interval}}")
