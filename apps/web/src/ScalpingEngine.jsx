@@ -12,16 +12,16 @@ function engine(a,old,opts){
   let av=atr(a,i);if(!av)continue;let body=Math.abs(b.close-b.open);
   if(up||(b.close>b.open&&body>=av*.35&&b.close>p.high)){for(let k=i-1;k>=Math.max(0,i-12);k--)if(a[k].close<a[k].open){bull={hi:a[k].high,lo:a[k].low,i:k};break}}
   if(dn||(b.close<b.open&&body>=av*.35&&b.close<p.low)){for(let k=i-1;k>=Math.max(0,i-12);k--)if(a[k].close>a[k].open){bear={hi:a[k].high,lo:a[k].low,i:k};break}}
-  for(let t of trades){if(b.time<=t.time||t.status==="TP"||t.status==="SL")continue;let r=Math.abs(t.entry-t.initialSL);
-   if(opts.be&&t.status==="ACTIVE"&&(t.side==="BUY"?b.high>=t.entry+r:b.low<=t.entry-r)){t.sl=t.entry;t.status="RISK-FREE"}
-   let stop=t.side==="BUY"?b.low<=t.sl:b.high>=t.sl,target=t.side==="BUY"?b.high>=t.tp:b.low<=t.tp;
+  for(let t of trades){if(b.time<=t.time||t.status==="TP"||t.status==="SL")continue;let r=Math.abs(t.entry-t.initialSL),movedToBE=false;
+   if(opts.be&&t.status==="ACTIVE"&&(t.side==="BUY"?b.high>=t.entry+r:b.low<=t.entry-r)){t.sl=t.entry;t.status="RISK-FREE";movedToBE=true}
+   let stop=!movedToBE&&(t.side==="BUY"?b.low<=t.sl:b.high>=t.sl),target=t.side==="BUY"?b.high>=t.tp:b.low<=t.tp;
    if(stop){t.status="SL";t.exit=t.sl;t.closedAt=b.time}else if(target){t.status="TP";t.exit=t.tp;t.closedAt=b.time}
   }
   if(i!==a.length-1)continue;
   let bs=sl&&b.low<sl.v&&b.close>sl.v&&b.close>b.open,ss=sh&&b.high>sh.v&&b.close<sh.v&&b.close<b.open;
   let br=bull&&i>bull.i&&i-bull.i<100&&b.low<=bull.hi&&b.close>bull.hi&&b.close>b.open;
   let sr=bear&&i>bear.i&&i-bear.i<100&&b.high>=bear.lo&&b.close<bear.lo&&b.close<b.open;
-  let lastForMarket=trades.find(t=>t.symbol===opts.symbol&&t.timeframe===opts.tf);let cooldown=!lastForMarket||a.length-lastForMarket.barIndex>5;
+  let lastForMarket=trades.find(t=>t.symbol===opts.symbol&&t.timeframe===opts.tf);let hasActive=trades.some(t=>t.symbol===opts.symbol&&t.timeframe===opts.tf&&(t.status==="ACTIVE"||t.status==="RISK-FREE"));let cooldown=(!lastForMarket||a.length-lastForMarket.barIndex>5)&&!hasActive;
   let side=(bs||br)&&(!opts.gate||structure===1)&&cooldown?"BUY":(ss||sr)&&(!opts.gate||structure===-1)&&cooldown?"SELL":null;
   if(side){let entry=b.close,edge=side==="BUY"?(bs?b.low:Math.min(b.low,bull?.lo??b.low)):(ss?b.high:Math.max(b.high,bear?.hi??b.high)),stop=edge+(side==="BUY"?-1:1)*av*.15,r=Math.abs(entry-stop);
    if(r>0){let id=String(b.time)+side;if(!trades.some(t=>t.id===id))trades.unshift({id:id,side:side,entry:entry,initialSL:stop,sl:stop,tp:entry+(side==="BUY"?1:-1)*r*opts.rr,rr:opts.rr,status:"ACTIVE",reason:bs||ss?"LIQUIDITY SWEEP":"OB RETEST",barIndex:i,time:b.time,symbol:opts.symbol,timeframe:opts.tf})}
