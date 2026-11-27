@@ -18,3 +18,12 @@ tr{animation:rowFlash .8s ease}
 
 .backtest-result{margin-top:10px;padding:10px;background:#0d1820;border:1px solid #293b49;border-radius:7px;color:#b9c8d5;font-size:10px;line-height:1.55}
 .backtest-result b{color:#dce8ef}.backtest-result p{margin:5px 0}.backtest-result small{color:#8493a5;font-size:9px}
+
+/* Scatter background: animated tunnel canvas sits under the transparent SVG */
+.plot-wrap{position:relative;isolation:isolate;background:#09080c;background-image:none}
+.plot-wrap #bg-fx{position:absolute;inset:0;width:100%;height:100%;display:block;z-index:0;pointer-events:none}
+.plot-wrap svg{position:relative;z-index:1}
+.plot-label{paint-order:stroke;stroke:#09080c;stroke-width:3px;stroke-opacity:.75;stroke-linejoin:round}
+.plot-dot{stroke-width:.9}
+.table-more{display:flex;justify-content:center;padding:10px}
+.table-more[hidden],#more-rows[hidden]{display:none}

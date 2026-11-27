@@ -11,6 +11,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm ci
+      - run: npm install --no-package-lock
       - run: node --check server.js
       - run: node --check public/app.js
+      - run: node --check public/bg.js
