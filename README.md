@@ -23,8 +23,14 @@ npm install
 npm start
 ```
 
+## Screener controls
+- **Scatter zoom / pan**: mouse wheel, pinch, double-click or the +/−/⤢ buttons zoom; drag to move. Zoom is semantic, so coin names appear as you zoom into a cluster. Tap/click a dot to open the coin. *Reset view* restores everything.
+- **Sortable table**: click any column header (Price, 1h %, 24h %, OI and every RSI timeframe 1m → 1W). First click = highest first, second = lowest first, third = clear. Coins with no data for that timeframe always sort last (1m/5m only exist for the most liquid coins, see `SCREENER_1M_COINS` / `SCREENER_5M_COINS`).
+- **Coin drawer chart**: candlesticks + volume + RSI(14) pane, live every 5s, intervals 1m–1W. Opens on the timeframe you are sorting by. Data comes from `/api/klines` (cached 4s, coalesced, per-IP limited, shares the MEXC request pacer). Chart library: TradingView Lightweight Charts (Apache-2.0, vendored in `public/vendor`).
+- **New-coin sound**: the server re-reads the MEXC listing every `UNIVERSE_REFRESH_MS` (default 120000) and pushes a `newcoin` event when a symbol appears that it has not seen before; the page plays a chime and shows a toast. Toggle with the 🔊 button. Browsers only allow audio after the first tap on the page.
+
 ## Optional tuning variables
-`SCREENER_MAX_COINS` (`all` by default; the old `SCREENER_COINS` cap is ignored), `SCREENER_MIN_VOLUME` (24h USDT volume floor, default 0), `MEXC_RATE`, `SCREENER_1M_COINS`, `SCREENER_5M_COINS`, `MEXC_REST_URL`, `MEXC_FUTURES_URL`.
+`SCREENER_MAX_COINS` (`all` by default; the old `SCREENER_COINS` cap is ignored), `SCREENER_MIN_VOLUME` (24h USDT volume floor, default 0), `MEXC_RATE`, `SCREENER_1M_COINS`, `SCREENER_5M_COINS`, `UNIVERSE_REFRESH_MS`, `MEXC_REST_URL`, `MEXC_FUTURES_URL`.
 
 ## Optional alert environment variables
 Telegram: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
