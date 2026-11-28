@@ -17,3 +17,7 @@ jobs:
       - run: node --check public/bg.js
       - run: node --check public/chart.js
       - run: node --check public/sound.js
+      - run: node --check alerts.js
+      - run: node --check public/alerts.js
+      - run: node --check public/pwa.js
+      - run: node --check public/sw.js

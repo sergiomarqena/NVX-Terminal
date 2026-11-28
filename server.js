@@ -1,6 +1,7 @@
 import express from "express";
 import {WebSocketServer,WebSocket} from "ws";
 import {createServer} from "node:http";
+import {createAlerts} from "./alerts.js";
 
 const app=express(),server=createServer(app),wss=new WebSocketServer({noServer:true,perMessageDeflate:{threshold:1024}});
 const PORT=Number(process.env.PORT||3000);
@@ -16,8 +17,11 @@ const RATE=Math.max(2,Number(process.env.MEXC_RATE||15));
 const parseLimit=v=>{const s=String(v??"").trim().toLowerCase();if(!s||s==="all")return Infinity;const n=Number(s);return Number.isFinite(n)&&n>0?Math.floor(n):Infinity;};
 const MAX_COINS=parseLimit(process.env.SCREENER_MAX_COINS);
 const MIN_VOLUME=Math.max(0,Number(process.env.SCREENER_MIN_VOLUME||0));
-/* 1m and 5m candles go stale every few minutes, so they are only kept for the most liquid coins. */
+/* 1m and 5m candles go stale every few minutes. The most liquid coins get real candles re-downloaded on every close;
+   all other coins are seeded once and then driven by the 15s ticker (a synthetic candle per period), with a full
+   re-download every RESYNC minutes so the approximation never drifts. Every coin therefore has every timeframe. */
 const FAST={"1m":Number(process.env.SCREENER_1M_COINS||150),"5m":Number(process.env.SCREENER_5M_COINS||500)};
+const RESYNC={"1m":Math.max(3,Number(process.env.SCREENER_1M_RESYNC_MIN||15))*6e4,"5m":Math.max(5,Number(process.env.SCREENER_5M_RESYNC_MIN||30))*6e4};
 
 const TF=["1m","5m","15m","1h","4h","12h","1d","2d","3d","1w"];
 const TF_MS={"1m":6e4,"5m":3e5,"15m":9e5,"1h":36e5,"4h":144e5,"12h":432e5,"1d":864e5,"2d":1728e5,"3d":2592e5,"1w":6048e5};
@@ -26,13 +30,12 @@ const LOAD_ORDER=["4h","1h","1d","15m","1w","5m","1m"]; // bootstrap priority: d
 const PERIOD=14,MAXC=120;
 
 const state={status:"BOOTING",coins:new Map(),universe:[],lastUpdate:0,liveMarkets:0,errors:[],
-  alertRules:{overbought:true,oversold:true,confluence:true,minVolume:5000000},
   oi:{contracts:0,matched:0,updatedAt:0},progress:{loaded:0,total:0,percent:0}};
-const clients=wss.clients,cooldown=new Map(),inflight=new Set(),retryAt=new Map(),seen=new Set(),newListings=[];
+const clients=wss.clients,inflight=new Set(),retryAt=new Map(),seen=new Set(),newListings=[];
 let universeReady=false;
 let backoffUntil=0,dirty=false,contractMeta=new Map();
 
-app.use(express.json({limit:"32kb"}));app.use(express.static("public",{maxAge:"1h"}));
+app.use(express.json({limit:"32kb"}));app.use(express.static("public",{maxAge:"1h",setHeaders:(res,file)=>{if(/[\\/](sw\.js|manifest\.webmanifest)$/.test(file))res.setHeader("Cache-Control","no-cache");}}));
 const num=x=>Number.isFinite(Number(x))?Number(x):0,round=x=>Number.isFinite(x)?Math.round(x*10)/10:null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const logErr=e=>{state.errors.push(String(e.message||e));if(state.errors.length>8)state.errors.shift();};
@@ -41,7 +44,7 @@ const logErr=e=>{state.errors.push(String(e.message||e));if(state.errors.length>
 function rsi(values){if(!values||values.length<PERIOD+1)return null;let g=0,l=0;for(let i=1;i<=PERIOD;i++){const d=values[i]-values[i-1];g+=Math.max(d,0);l+=Math.max(-d,0);}g/=PERIOD;l/=PERIOD;for(let i=PERIOD+1;i<values.length;i++){const d=values[i]-values[i-1];g=(g*13+Math.max(d,0))/14;l=(l*13+Math.max(-d,0))/14;}return l===0?(g===0?50:100):100-100/(1+g/l);}
 function zone(v){return v==null?"loading":v>=70?"overbought":v>=60?"strong":v<=30?"oversold":v<=40?"weak":"neutral";}
 /* a frame is {times[],closes[],...}: only closes are needed for RSI, which keeps 1,300 coins x 7 frames small */
-function calc(c,tf){const f=c.frames[tf];if(!f||(f.synth||0)>3)return null;return round(rsi(f.closes));}
+function calc(c,tf){const f=c.frames[tf];if(!f)return null;if(f.tick){if(Date.now()-(c.tickAt||0)>180000)return null;}else if((f.synth||0)>3)return null;return round(rsi(f.closes));}
 function setFrame(c,tf,times,closes){c.frames[tf]={times:times.slice(-MAXC),closes:closes.slice(-MAXC),fetchedLast:times.at(-1)||0,fetchedAt:Date.now(),synth:0,nextAt:0};}
 function agg(f,periodMs){if(!f)return null;const t=[],cl=[];for(let i=0;i<f.times.length;i++){const k=Math.floor(f.times[i]/periodMs)*periodMs;if(t.length&&t[t.length-1]===k)cl[cl.length-1]=f.closes[i];else{t.push(k);cl.push(f.closes[i]);}}return{times:t.slice(-MAXC),closes:cl.slice(-MAXC)};}
 function derive(c){for(const[tf,src]of[["12h","4h"],["2d","1d"],["3d","1d"]]){const d=agg(c.frames[src],TF_MS[tf]);if(d)c.frames[tf]=d;}}
@@ -79,8 +82,9 @@ async function refreshUniverse(){
   if(fresh.length){newListings.push(...fresh);if(newListings.length>20)newListings.splice(0,newListings.length-20);console.log("New coins:",fresh.map(x=>x.symbol).join(", "));broadcast("newcoin",{coins:fresh});}}
 async function refreshTickers(){
   const rows=await get("/api/v3/ticker/24hr",40),stats=new Map(rows.map(t=>[t.symbol,t])),now=Date.now();
-  for(const c of state.coins.values()){const t=stats.get(c.symbol);if(t){Object.assign(c,tickerMap(t),{updatedAt:now});applyTick(c,now);}}
-  rankCoins();state.lastUpdate=now;broadcastMarket();}
+  for(const c of state.coins.values()){const t=stats.get(c.symbol);if(t){Object.assign(c,tickerMap(t),{updatedAt:now,tickAt:now});applyTick(c,now);}}
+  rankCoins();state.lastUpdate=now;broadcastMarket();
+  try{alerts.evaluate();}catch(e){logErr(e);}}
 
 /* ---- MEXC futures open interest ------------------------------------------------------------- */
 async function futGet(path){const r=await fetch(FUT+path,{headers:{"user-agent":"NORDVEX-RSI-Screener/2.0"},signal:AbortSignal.timeout(15000)});if(!r.ok)throw new Error("MEXC futures HTTP "+r.status+" "+path);const d=await r.json();if(d.success===false||(d.code!==undefined&&d.code!==0&&d.code!==200))throw new Error("MEXC futures "+d.code+": "+(d.message||"request failed"));return d.data;}
@@ -96,7 +100,9 @@ async function refreshOI(){
   state.oi={contracts:arr.length,matched,updatedAt:Date.now()};dirty=true;}
 
 /* ---- candle scheduler ----------------------------------------------------------------------- */
-function eligible(c,tf){const cap=FAST[tf];return cap===undefined||c.rank<cap;}
+function eligible(){return true;}
+/* beyond the top-N coins, 1m/5m candles are ticker-driven and only re-downloaded now and then */
+function tickMode(c,tf){const cap=FAST[tf];return cap!==undefined&&c.rank>=cap;}
 function computeProgress(){let total=0,loaded=0;for(const c of state.coins.values())for(const tf of LOAD_ORDER){if(!eligible(c,tf))continue;total++;if(c.frames[tf])loaded++;}state.progress={loaded,total,percent:total?Math.floor(loaded/total*100):0};}
 function buildQueue(){
   const now=Date.now(),first=[],stale=[];
@@ -107,15 +113,16 @@ function buildQueue(){
 async function runJob({c,tf,key}){
   inflight.add(key);
   try{
-    const old=calc(c,tf),prev=c.frames[tf]?.fetchedLast||0,rows=await get("/api/v3/klines?symbol="+c.symbol+"&interval="+REST_TF[tf]+"&limit=100");
+    const prev=c.frames[tf]?.fetchedLast||0,rows=await get("/api/v3/klines?symbol="+c.symbol+"&interval="+REST_TF[tf]+"&limit=100");
     if(!Array.isArray(rows)||!rows.length){retryAt.set(key,Date.now()+600000);return;}
     setFrame(c,tf,rows.map(x=>num(x[0])),rows.map(x=>num(x[4])));
-    const f=c.frames[tf],now=Date.now(),due=f.fetchedLast+TF_MS[tf]+2000;
-    f.nextAt=due>now?due:now+TF_MS[tf]; // pairs that did not trade in the latest period are re-checked one period later
+    const f=c.frames[tf],now=Date.now(),due=f.fetchedLast+TF_MS[tf]+2000,tick=tickMode(c,tf);
+    if(tick){f.tick=true;f.nextAt=now+RESYNC[tf]*(.8+.4*Math.random());alerts.reseed(c.symbol,tf);}
+    else f.nextAt=due>now?due:now+TF_MS[tf]; // pairs that did not trade in the latest period are re-checked one period later
     if(tf==="4h"||tf==="1d")derive(c);
     if(tf==="4h"&&(!prev||f.fetchedLast>prev))c.divergence=detectDivergence(c);
     c.updatedAt=now;dirty=true;
-    if(prev>0&&f.fetchedLast>prev){await notify(c,tf,old,calc(c,tf));if(c.quoteVolume>=state.alertRules.minVolume)broadcast("coin",{coin:snapshot(c),timeframe:tf,closed:true});}
+    if(!tick&&prev>0&&f.fetchedLast>prev&&c.quoteVolume>=5e6)broadcast("coin",{coin:snapshot(c),timeframe:tf,closed:true});
   }catch(e){logErr(e);retryAt.set(key,Date.now()+30000);}
   finally{inflight.delete(key);}}
 const queue=[];let lastBuild=0;
@@ -125,12 +132,9 @@ async function worker(){for(;;){const j=nextJob();if(!j){await sleep(500);contin
 function updateStatus(){const p=state.progress,fourH=[...state.coins.values()].filter(c=>c.frames["4h"]).length/(state.coins.size||1);
   state.status=p.total&&p.loaded>=p.total?"LIVE · REAL-TIME":fourH>=0.9?"LIVE · BACKFILL "+p.percent+"%":"LOADING RSI HISTORY "+p.percent+"%";}
 
-/* ---- alerts --------------------------------------------------------------------------------- */
-async function notify(c,tf,oldV,newV){if(oldV==null||newV==null)return;if(c.quoteVolume<state.alertRules.minVolume)return;const signal=state.alertRules.overbought&&oldV<70&&newV>=70?"OVERBOUGHT":state.alertRules.oversold&&oldV>30&&newV<=30?"OVERSOLD":null;if(!signal)return;const key=c.symbol+":"+tf+":"+signal,now=Date.now();if(now-(cooldown.get(key)||0)<1800000)return;cooldown.set(key,now);const message="NORDVEX RSI ALERT\n"+c.symbol+" · "+tf+"\n"+signal+" · RSI 14 "+newV.toFixed(1)+"\nPrice: "+c.price+"\nMEXC Spot public market data";const tasks=[];if(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID)tasks.push(fetch("https://api.telegram.org/bot"+process.env.TELEGRAM_BOT_TOKEN+"/sendMessage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:process.env.TELEGRAM_CHAT_ID,text:message})}));if(process.env.WHATSAPP_ACCESS_TOKEN&&process.env.WHATSAPP_PHONE_NUMBER_ID&&process.env.WHATSAPP_TO)tasks.push(fetch("https://graph.facebook.com/v21.0/"+process.env.WHATSAPP_PHONE_NUMBER_ID+"/messages",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+process.env.WHATSAPP_ACCESS_TOKEN},body:JSON.stringify({messaging_product:"whatsapp",to:process.env.WHATSAPP_TO,type:"text",text:{body:message}})}));await Promise.allSettled(tasks);}
-
 /* ---- HTTP API ------------------------------------------------------------------------------- */
-app.get("/api/health",(_q,res)=>res.json({ok:true,service:"NORDVEX RSI Screener",status:state.status,coins:state.coins.size,listed:state.universe.length,liveMarkets:state.liveMarkets,progress:state.progress,openInterest:state.oi,newListings:newListings.slice(-5),rateLimit:{weightPerSecond:RATE,backoffSeconds:Math.max(0,Math.ceil((backoffUntil-Date.now())/1000))},refresh:"ticker every 15s drives live RSI; candles re-fetched on close (1m/5m for top "+FAST["1m"]+"/"+FAST["5m"]+" coins)",errors:state.errors.slice(-4),updatedAt:state.lastUpdate,source:"MEXC Spot + Futures public REST"}));
-app.get("/api/config",(_q,res)=>res.json({telegramConfigured:!!(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID),alertRules:state.alertRules,whatsappConfigured:!!(process.env.WHATSAPP_ACCESS_TOKEN&&process.env.WHATSAPP_PHONE_NUMBER_ID&&process.env.WHATSAPP_TO),timeframes:TF,coinLimit:Number.isFinite(MAX_COINS)?MAX_COINS:"all",fastCoins:FAST,source:"MEXC Spot"}));
+app.get("/api/health",(_q,res)=>res.json({ok:true,service:"NORDVEX RSI Screener",status:state.status,coins:state.coins.size,listed:state.universe.length,liveMarkets:state.liveMarkets,progress:state.progress,openInterest:state.oi,newListings:newListings.slice(-5),rateLimit:{weightPerSecond:RATE,backoffSeconds:Math.max(0,Math.ceil((backoffUntil-Date.now())/1000))},refresh:"ticker every 15s drives live RSI; candles re-fetched on close (exact 1m/5m candles for the top "+FAST["1m"]+"/"+FAST["5m"]+" coins, ticker-built for the rest)",errors:state.errors.slice(-4),updatedAt:state.lastUpdate,source:"MEXC Spot + Futures public REST"}));
+app.get("/api/config",(_q,res)=>res.json({telegramConfigured:!!(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID),alertsLocked:!process.env.ALERT_PIN,whatsappConfigured:!!(process.env.WHATSAPP_ACCESS_TOKEN&&process.env.WHATSAPP_PHONE_NUMBER_ID&&process.env.WHATSAPP_TO),timeframes:TF,coinLimit:Number.isFinite(MAX_COINS)?MAX_COINS:"all",fastCoins:FAST,source:"MEXC Spot"}));
 app.get("/api/market/universe",(_q,res)=>res.json({symbols:state.universe,updatedAt:state.lastUpdate,source:"MEXC Spot"}));
 app.get("/api/market/snapshot",(_q,res)=>res.json({status:state.status,coins:[...state.coins.values()].map(snapshot),timeframes:TF,listed:state.universe.length,progress:state.progress,openInterest:state.oi,source:"MEXC Spot",updatedAt:Date.now()}));
 app.get("/api/market/scan",(_q,res)=>res.json({data:[...state.coins.values()].flatMap(c=>TF.map(tf=>({symbol:c.symbol,timeframe:tf,rsi:calc(c,tf),close:c.price}))).filter(x=>x.rsi!=null),timeframes:TF,scannedSymbols:state.coins.size,totalSymbols:state.universe.length,updatedAt:Date.now(),source:"MEXC Spot REST + live ticker, Wilder RSI"}));
@@ -139,21 +143,22 @@ const hits=new Map();
 function limited(req,max){const ip=req.ip||"?",now=Date.now(),h=hits.get(ip);if(!h||now>h.reset){hits.set(ip,{n:1,reset:now+60000});return false;}return++h.n>max;}
 setInterval(()=>{const now=Date.now();for(const[k,v]of hits)if(now>v.reset)hits.delete(k);},60000).unref();
 const klineCache=new Map();
-app.get("/api/klines",async(req,res)=>{
-  if(limited(req,120))return res.status(429).json({error:"Too many chart requests — slow down."});
-  const symbol=String(req.query.symbol||"").toUpperCase(),iv=String(req.query.interval||"15m"),limit=Math.min(500,Math.max(30,Math.floor(Number(req.query.limit))||300));
-  if(!state.coins.has(symbol))return res.status(404).json({error:"Unknown symbol."});
-  if(!REST_TF[iv])return res.status(400).json({error:"Unsupported interval."});
+/* shared by the chart endpoint and the alert volume filter: 4s cache, concurrent callers share one request */
+function klines(symbol,iv,limit){
   const key=symbol+"|"+iv+"|"+limit,now=Date.now();let entry=klineCache.get(key);
   if(!entry||now-entry.at>=4000){
     const p=get("/api/v3/klines?symbol="+symbol+"&interval="+REST_TF[iv]+"&limit="+limit).then(rows=>({symbol,interval:iv,candles:rows.map(x=>[num(x[0]),num(x[1]),num(x[2]),num(x[3]),num(x[4]),num(x[5])])}));
     entry={at:now,p};klineCache.set(key,entry);p.catch(()=>{if(klineCache.get(key)===entry)klineCache.delete(key);});
     if(klineCache.size>300)for(const k of[...klineCache.keys()].slice(0,100))klineCache.delete(k);}
-  try{res.json(await entry.p);}catch(e){res.status(502).json({error:e.message});}});
+  return entry.p;}
+app.get("/api/klines",async(req,res)=>{
+  if(limited(req,120))return res.status(429).json({error:"Too many chart requests — slow down."});
+  const symbol=String(req.query.symbol||"").toUpperCase(),iv=String(req.query.interval||"15m"),limit=Math.min(500,Math.max(30,Math.floor(Number(req.query.limit))||300));
+  if(!state.coins.has(symbol))return res.status(404).json({error:"Unknown symbol."});
+  if(!REST_TF[iv])return res.status(400).json({error:"Unsupported interval."});
+  try{res.json(await klines(symbol,iv,limit));}catch(e){res.status(502).json({error:e.message});}});
+const alerts=createAlerts({app,coins:()=>state.coins,calc,rsi,TF,TF_MS,klines,broadcast,logErr,ready:()=>state.progress.percent>=90});
 app.get("/api/backtest",async(req,res)=>{try{if(limited(req,30))return res.status(429).json({error:"Too many requests."});const symbol=String(req.query.symbol||"").toUpperCase();if(!/^[A-Z0-9]{4,24}$/.test(symbol))return res.status(400).json({error:"Invalid symbol."});const rows=await get("/api/v3/klines?symbol="+symbol+"&interval=4h&limit=500",2),closes=rows.map(x=>num(x[4])),values=closes.map((_,i)=>i<PERIOD?null:rsi(closes.slice(0,i+1)));let entry=null,trades=[];for(let i=PERIOD+1;i<values.length;i++){const p=values[i-1],v=values[i];if(p==null||v==null)continue;if(entry===null&&p<30&&v>=30)entry={price:closes[i],time:num(rows[i][0])};else if(entry&&v>=50){trades.push({entry:entry.price,exit:closes[i],returnPct:(closes[i]-entry.price)/entry.price*100,entryTime:entry.time,exitTime:num(rows[i][0])});entry=null;}}const wins=trades.filter(t=>t.returnPct>0).length,net=trades.reduce((a,t)=>a+t.returnPct,0);let equity=0,peak=0,maxDd=0;for(const t of trades){equity+=t.returnPct;peak=Math.max(peak,equity);maxDd=Math.max(maxDd,peak-equity);}res.json({symbol,timeframe:"4h",period:14,historyBars:rows.length,trades:trades.length,wins,losses:trades.length-wins,winRate:trades.length?wins/trades.length*100:null,netReturnPct:net,maxDrawdownPct:maxDd,latestTrades:trades.slice(-8).reverse(),method:"Educational RSI-14 illustration: cross back above 30, exit at 50.",disclaimer:"Historical illustration only; excludes fees and slippage. Not a prediction or recommendation."});}catch(e){res.status(502).json({error:e.message});}});
-app.post("/api/alerts/rules",(req,res)=>{const r=req.body||{};state.alertRules={overbought:!!r.overbought,oversold:!!r.oversold,confluence:!!r.confluence,minVolume:Math.max(0,num(r.minVolume))};res.json({ok:true,alertRules:state.alertRules});});
-app.post("/api/alerts/test",async(req,res)=>{const channel=req.body?.channel;try{if(channel==="telegram"){if(!process.env.TELEGRAM_BOT_TOKEN||!process.env.TELEGRAM_CHAT_ID)return res.status(400).json({error:"Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in Railway Variables."});const r=await fetch("https://api.telegram.org/bot"+process.env.TELEGRAM_BOT_TOKEN+"/sendMessage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:process.env.TELEGRAM_CHAT_ID,text:"NORDVEX RSI Screener test alert — Telegram connected."})});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.description||"Telegram rejected message");return res.json({ok:true,message:"Telegram test delivered."});}if(channel==="whatsapp"){const{WHATSAPP_ACCESS_TOKEN,WHATSAPP_PHONE_NUMBER_ID,WHATSAPP_TO}=process.env;if(!WHATSAPP_ACCESS_TOKEN||!WHATSAPP_PHONE_NUMBER_ID||!WHATSAPP_TO)return res.status(400).json({error:"Set WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_TO in Railway Variables."});const r=await fetch("https://graph.facebook.com/v21.0/"+WHATSAPP_PHONE_NUMBER_ID+"/messages",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+WHATSAPP_ACCESS_TOKEN},body:JSON.stringify({messaging_product:"whatsapp",to:WHATSAPP_TO,type:"text",text:{body:"NORDVEX RSI Screener test alert — WhatsApp connected."}})});const d=await r.json();if(!r.ok)throw Error(d.error?.message||"WhatsApp rejected message");return res.json({ok:true,message:"WhatsApp test accepted."});}res.status(400).json({error:"Select Telegram or WhatsApp."});}catch(e){res.status(502).json({error:e.message});}});
-app.post("/api/alerts/notify",async(req,res)=>{const{symbol,timeframe,rsi:value,signal}=req.body||{};if(!symbol||!timeframe||!Number.isFinite(Number(value))||!["OVERBOUGHT","OVERSOLD","CONFLUENCE"].includes(signal))return res.status(400).json({error:"Invalid alert."});const message="NORDVEX RSI ALERT\n"+symbol+" · "+timeframe+"\n"+signal+" · RSI 14 "+Number(value).toFixed(1);const tasks=[];if(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID)tasks.push(fetch("https://api.telegram.org/bot"+process.env.TELEGRAM_BOT_TOKEN+"/sendMessage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:process.env.TELEGRAM_CHAT_ID,text:message})}));if(process.env.WHATSAPP_ACCESS_TOKEN&&process.env.WHATSAPP_PHONE_NUMBER_ID&&process.env.WHATSAPP_TO)tasks.push(fetch("https://graph.facebook.com/v21.0/"+process.env.WHATSAPP_PHONE_NUMBER_ID+"/messages",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+process.env.WHATSAPP_ACCESS_TOKEN},body:JSON.stringify({messaging_product:"whatsapp",to:process.env.WHATSAPP_TO,type:"text",text:{body:message}})}));if(!tasks.length)return res.status(400).json({error:"Notification credentials are not configured."});const results=await Promise.allSettled(tasks);res.json({ok:results.some(x=>x.status==="fulfilled"&&x.value.ok)});});
 server.on("upgrade",(req,socket,head)=>{if(req.url!=="/ws")return socket.destroy();wss.handleUpgrade(req,socket,head,ws=>wss.emit("connection",ws,req));});
 wss.on("connection",ws=>{ws.send(JSON.stringify({type:"hello",data:{status:state.status,coins:state.coins.size,listed:state.universe.length}}));if(state.coins.size)ws.send(JSON.stringify({type:"market",data:marketPayload()}));});
 

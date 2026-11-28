@@ -14,7 +14,7 @@ A real-time, read-only crypto spot-market RSI dashboard.
   - one shared pacer for all spot REST calls (`MEXC_RATE`, default 15 weight/s) and a hard back-off on any 429/418
   - the 24h ticker (every 15s) updates each coin's latest candle, so RSI moves live for all coins and timeframes without re-downloading candles
   - candles are re-fetched only when a period closes; first load fills 4h → 1h → 1d → 15m → 1w → 5m → 1m (about 10 min for everything, the default 4H view is ready in ~2 min)
-  - 1m/5m candles are kept for the most liquid coins only (`SCREENER_1M_COINS`=150, `SCREENER_5M_COINS`=500); longer frames cover all coins
+  - every coin has every timeframe: exact 1m/5m candles are re-downloaded on each close for the most liquid coins (`SCREENER_1M_COINS`=150, `SCREENER_5M_COINS`=500); the rest are seeded once, built from the 15s ticker and fully re-synced every `SCREENER_1M_RESYNC_MIN`=15 / `SCREENER_5M_RESYNC_MIN`=30 minutes
 - External alerts are sent only when a candle closes across the configured RSI threshold
 
 ## Run
@@ -25,19 +25,27 @@ npm start
 
 ## Screener controls
 - **Scatter zoom / pan**: mouse wheel, pinch, double-click or the +/−/⤢ buttons zoom; drag to move. Zoom is semantic, so coin names appear as you zoom into a cluster. Tap/click a dot to open the coin. *Reset view* restores everything.
-- **Sortable table**: click any column header (Price, 1h %, 24h %, OI and every RSI timeframe 1m → 1W). First click = highest first, second = lowest first, third = clear. Coins with no data for that timeframe always sort last (1m/5m only exist for the most liquid coins, see `SCREENER_1M_COINS` / `SCREENER_5M_COINS`).
+- **Sortable table**: click any column header (Price, 1h %, 24h %, OI and every RSI timeframe 1m → 1W). First click = highest first, second = lowest first, third = clear. Coins with no data for that timeframe always sort last.
 - **Coin drawer chart**: candlesticks + volume + RSI(14) pane, live every 5s, intervals 1m–1W. Opens on the timeframe you are sorting by. Data comes from `/api/klines` (cached 4s, coalesced, per-IP limited, shares the MEXC request pacer). Chart library: TradingView Lightweight Charts (Apache-2.0, vendored in `public/vendor`).
 - **New-coin sound**: the server re-reads the MEXC listing every `UNIVERSE_REFRESH_MS` (default 120000) and pushes a `newcoin` event when a symbol appears that it has not seen before; the page plays a chime and shows a toast. Toggle with the 🔊 button. Browsers only allow audio after the first tap on the page.
 
 ## Optional tuning variables
 `SCREENER_MAX_COINS` (`all` by default; the old `SCREENER_COINS` cap is ignored), `SCREENER_MIN_VOLUME` (24h USDT volume floor, default 0), `MEXC_RATE`, `SCREENER_1M_COINS`, `SCREENER_5M_COINS`, `UNIVERSE_REFRESH_MS`, `MEXC_REST_URL`, `MEXC_FUTURES_URL`.
 
-## Optional alert environment variables
-Telegram: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+## Alerts and the installable web app
+Alerts are rules you create in the **Alerts** panel (PIN protected) and are evaluated on the server, so they fire while your phone is locked:
+timeframe + "RSI crosses above/below N" (live, or confirmed on bar close), coin scope (all / OI top 50-200 / top 60 / your own list), minimum 24h volume,
+cooldown per coin, and an optional **volume filter**: the last *closed* bar of a chosen timeframe must have volume >= x times its SMA(n) (same maths as the MA line on the chart).
+Delivery: Telegram, Web Push notifications (works with the app closed) and a toast + sound when the page is open. Many hits in one cycle are sent as one digest message.
 
-WhatsApp Cloud API: WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TO
+Railway variables:
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` - Telegram delivery (press Start on your bot first; the chat id must be yours, not the bot's)
+- `ALERT_PIN` - required: the PIN that unlocks the Alerts panel (the site itself is public)
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` - Web Push identity (generate once with `npx web-push generate-vapid-keys`; changing them invalidates existing subscriptions)
+- `DATA_DIR` - optional folder (a Railway Volume mount) for `alerts.json`; without it alerts live on the container disk and the browser re-sends its backup copy after a redeploy
+- `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TO` - optional WhatsApp Cloud API channel
 
-Set secrets in Railway Variables. Never commit them to GitHub or paste them into public chats. Test-alert actions are included for both channels.
+Install: Android/desktop Chrome show an **Install** button; on iPhone use Share > Add to Home Screen, open the app from the home screen, then tap *Enable* in the Alerts panel (iOS only allows push for installed web apps).
 
 ## Endpoints
 - GET /api/health
